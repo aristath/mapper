@@ -29,9 +29,9 @@ The product goal is simple:
 
 ## Current Status
 
-This repository is at the planning and technical-spike stage. The first
-implementation milestone is a single-city offline prototype that can render a
-local pixel-styled map and calculate a route without network access.
+This repository is at the technical-spike stage. The current implementation
+focuses on generic downloadable region packs that can be installed, selected,
+updated, and opened without network access.
 
 ## Pack Tooling
 
@@ -94,6 +94,24 @@ Generate a basic local MapLibre style for the pack:
 
 ```bash
 cargo run -p mapper-pack -- add-default-style \
+  --pack target/region.mapperpack
+```
+
+Attach generated Valhalla graph tiles to a pack:
+
+```bash
+cargo run -p mapper-pack -- add-file \
+  --pack target/region.mapperpack \
+  --source data/work/valhalla_tiles.tar \
+  --pack-path routing/valhalla_tiles.tar \
+  --kind valhalla_tiles \
+  --feature routing:pedestrian
+```
+
+Generate a local Valhalla config for the pack:
+
+```bash
+cargo run -p mapper-pack -- add-default-valhalla-config \
   --pack target/region.mapperpack
 ```
 

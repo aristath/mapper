@@ -98,6 +98,7 @@ pub struct RuntimeAssets {
     pub vector_tiles: Option<String>,
     pub style_json: Option<String>,
     pub valhalla_tiles: Option<String>,
+    pub valhalla_config: Option<String>,
     pub search_index: Option<String>,
     pub poi_index: Option<String>,
     pub gtfs: Option<String>,
@@ -268,6 +269,9 @@ pub fn inspect_pack(path: &Path) -> Result<Inspection, PackError> {
     if !manifest.features.routing.is_empty() && !declares_kind(&manifest, "valhalla_tiles") {
         warnings.push("routing is enabled but no valhalla_tiles file is declared".to_string());
     }
+    if !manifest.features.routing.is_empty() && !declares_kind(&manifest, "valhalla_config") {
+        warnings.push("routing is enabled but no valhalla_config file is declared".to_string());
+    }
     if manifest.features.search && !declares_kind(&manifest, "search_index") {
         warnings.push("search is enabled but no search_index file is declared".to_string());
     }
@@ -342,6 +346,41 @@ pub fn add_default_style_to_pack(pack: &Path) -> Result<PackFile, PackError> {
     manifest.files.retain(|file| file.path != pack_file.path);
     manifest.files.push(pack_file.clone());
     apply_feature(&mut manifest, &Some("rendering".to_string()))?;
+    write_json(&manifest_path, &manifest)?;
+
+    Ok(pack_file)
+}
+
+pub fn add_default_valhalla_config_to_pack(pack: &Path) -> Result<PackFile, PackError> {
+    let manifest_path = pack.join("manifest.json");
+    let mut manifest = read_manifest(&manifest_path)?;
+    validate_manifest(&manifest)?;
+
+    let tiles = manifest
+        .files
+        .iter()
+        .find(|file| file.kind == "valhalla_tiles")
+        .ok_or_else(|| PackError::Invalid("pack has no valhalla_tiles file".to_string()))?;
+    validate_relative_pack_path(Path::new(&tiles.path))?;
+
+    let config_path = PathBuf::from("routing/valhalla.json");
+    let target_path = pack.join(&config_path);
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    write_json(&target_path, &default_valhalla_config(&tiles.path))?;
+
+    let metadata = fs::metadata(&target_path)?;
+    let pack_file = PackFile {
+        path: config_path.to_string_lossy().to_string(),
+        kind: "valhalla_config".to_string(),
+        bytes: metadata.len(),
+        sha256: sha256_file(&target_path)?,
+    };
+
+    manifest.files.retain(|file| file.path != pack_file.path);
+    manifest.files.push(pack_file.clone());
     write_json(&manifest_path, &manifest)?;
 
     Ok(pack_file)
@@ -896,6 +935,7 @@ pub fn runtime_config(pack: &Path) -> Result<RuntimeConfig, PackError> {
             vector_tiles: optional_asset_path(pack, "vector_tiles")?,
             style_json: optional_asset_path(pack, "style_json")?,
             valhalla_tiles: optional_asset_path(pack, "valhalla_tiles")?,
+            valhalla_config: optional_asset_path(pack, "valhalla_config")?,
             search_index: optional_asset_path(pack, "search_index")?,
             poi_index: optional_asset_path(pack, "poi_index")?,
             gtfs: optional_asset_path(pack, "gtfs")?,
@@ -1395,6 +1435,39 @@ fn default_maplibre_style(manifest: &Manifest, tile_url: &str) -> serde_json::Va
                 }
             }
         ]
+    })
+}
+
+fn default_valhalla_config(tile_extract: &str) -> serde_json::Value {
+    serde_json::json!({
+        "mjolnir": {
+            "tile_extract": tile_extract
+        },
+        "loki": {
+            "actions": [
+                "route",
+                "locate",
+                "sources_to_targets",
+                "optimized_route",
+                "isochrone",
+                "trace_route",
+                "trace_attributes"
+            ]
+        },
+        "thor": {
+            "source_to_target_algorithm": "select_optimal"
+        },
+        "service_limits": {
+            "auto": {
+                "max_distance": 500000
+            },
+            "bicycle": {
+                "max_distance": 250000
+            },
+            "pedestrian": {
+                "max_distance": 100000
+            }
+        }
     })
 }
 
@@ -2114,6 +2187,72 @@ mod tests {
             .style_json
             .unwrap()
             .ends_with("map/style.json"));
+
+        fs::remove_dir_all(pack).ok();
+        fs::remove_dir_all(source.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn add_default_valhalla_config_declares_routing_config_asset() {
+        let pack = temp_pack_dir("valhalla-config-pack");
+        let source = temp_pack_dir("valhalla-config-source").join("valhalla_tiles.tar");
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"local valhalla tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        add_file_to_pack(AddFileOptions {
+            pack: pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("routing/valhalla_tiles.tar"),
+            kind: "valhalla_tiles".to_string(),
+            feature: Some("routing:pedestrian".to_string()),
+        })
+        .expect("routing tiles should attach");
+
+        let inspection = inspect_pack(&pack).expect("pack should inspect");
+        assert!(inspection
+            .warnings
+            .contains(&"routing is enabled but no valhalla_config file is declared".to_string()));
+
+        let config_file =
+            add_default_valhalla_config_to_pack(&pack).expect("valhalla config should generate");
+        assert_eq!(config_file.path, "routing/valhalla.json");
+        assert_eq!(config_file.kind, "valhalla_config");
+
+        let inspection = inspect_pack(&pack).expect("pack should inspect");
+        assert!(inspection.warnings.is_empty());
+
+        let config = runtime_config(&pack).expect("runtime config should build");
+        assert_eq!(config.features.routing, vec!["pedestrian".to_string()]);
+        assert!(config
+            .assets
+            .valhalla_tiles
+            .unwrap()
+            .ends_with("routing/valhalla_tiles.tar"));
+        assert!(config
+            .assets
+            .valhalla_config
+            .unwrap()
+            .ends_with("routing/valhalla.json"));
+
+        let valhalla_json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(pack.join("routing/valhalla.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            valhalla_json["mjolnir"]["tile_extract"],
+            "routing/valhalla_tiles.tar"
+        );
 
         fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(source.parent().unwrap()).ok();

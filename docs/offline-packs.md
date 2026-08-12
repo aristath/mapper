@@ -41,6 +41,7 @@ Current asset kinds:
 - `vector_tiles`
 - `style_json`
 - `valhalla_tiles`
+- `valhalla_config`
 - `search_index`
 - `poi_index`
 - `gtfs`

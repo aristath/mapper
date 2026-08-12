@@ -24,6 +24,11 @@ Valhalla should provide:
 - costing per travel mode
 - map matching for noisy GPS positions
 
+Each routing-capable pack declares both `valhalla_tiles` and
+`valhalla_config`. The config is generated inside the pack and points Valhalla at
+the local tile archive, so app code can launch routing from resolved local asset
+paths instead of guessing filenames.
+
 Mapper should provide:
 
 - UI route selection
@@ -47,4 +52,3 @@ Transit should wait until the pack pipeline can ingest and validate GTFS feeds.
 - Pixel art must never hide the next maneuver.
 - The debug build should include a normal geometry overlay for validating route
   correctness against the stylized map.
-

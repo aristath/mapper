@@ -1,11 +1,12 @@
 use mapper_pack::{
-    active_pack, active_runtime_config, add_default_style_to_pack, add_file_to_pack,
-    add_pack_to_registry, bundle_pack, init_pack, inspect_pack, install_bundle,
-    install_from_registry, install_pack, list_installed_packs, read_registry, registry_status,
-    required_toolchain, resolve_asset_path, runtime_config, set_active_pack, set_active_pack_at,
-    store_snapshot, unpack_bundle, update_from_registry, AddFileOptions, BundleOptions,
-    InitOptions, InstallBundleOptions, InstallFromRegistryOptions, InstallOptions,
-    RegistryAddOptions, UninstallOptions, UnpackOptions,
+    active_pack, active_runtime_config, add_default_style_to_pack,
+    add_default_valhalla_config_to_pack, add_file_to_pack, add_pack_to_registry, bundle_pack,
+    init_pack, inspect_pack, install_bundle, install_from_registry, install_pack,
+    list_installed_packs, read_registry, registry_status, required_toolchain, resolve_asset_path,
+    runtime_config, set_active_pack, set_active_pack_at, store_snapshot, unpack_bundle,
+    update_from_registry, AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions,
+    InstallFromRegistryOptions, InstallOptions, RegistryAddOptions, UninstallOptions,
+    UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -38,6 +39,13 @@ fn main() {
         "add-default-style" => {
             parse_pack_arg(args.collect(), "add-default-style").and_then(|pack| {
                 let file = add_default_style_to_pack(&pack)?;
+                println!("added {} ({} bytes, {})", file.path, file.bytes, file.kind);
+                Ok(())
+            })
+        }
+        "add-default-valhalla-config" => {
+            parse_pack_arg(args.collect(), "add-default-valhalla-config").and_then(|pack| {
+                let file = add_default_valhalla_config_to_pack(&pack)?;
                 println!("added {} ({} bytes, {})", file.path, file.bytes, file.kind);
                 Ok(())
             })
@@ -832,6 +840,7 @@ fn print_help() {
     println!("  mapper-pack inspect <pack-path>");
     println!("  mapper-pack add-file --pack <dir> --source <file> --pack-path <relative-path> --kind <kind> [--feature <feature>]");
     println!("  mapper-pack add-default-style --pack <dir>");
+    println!("  mapper-pack add-default-valhalla-config --pack <dir>");
     println!("  mapper-pack install --pack <dir> --store <dir>");
     println!("  mapper-pack bundle --pack <dir> --out <file.mapperpack.tar>");
     println!("  mapper-pack unpack --archive <file.mapperpack.tar> --out <dir>");
