@@ -426,6 +426,48 @@ pub fn read_registry(path: &Path) -> Result<Registry, PackError> {
     Ok(registry)
 }
 
+pub fn add_pack_to_registry(options: RegistryAddOptions) -> Result<RegistryPack, PackError> {
+    let inspection = inspect_pack(&options.pack)?;
+    require_clean_inspection(&inspection)?;
+    verify_archive_exists(&options.archive)?;
+
+    let mut registry = if options.registry.exists() {
+        read_registry(&options.registry)?
+    } else {
+        Registry {
+            schema: 1,
+            generated_at: options.generated_at.clone(),
+            packs: Vec::new(),
+        }
+    };
+
+    registry.generated_at = options.generated_at;
+
+    let entry = RegistryPack {
+        id: inspection.manifest.id,
+        name: inspection.manifest.name,
+        version: inspection.manifest.version,
+        country: inspection.manifest.region.country,
+        bbox: inspection.manifest.region.bbox,
+        url: options.url,
+        bytes: fs::metadata(&options.archive)?.len(),
+        sha256: sha256_file(&options.archive)?,
+        features: inspection.manifest.features,
+    };
+
+    registry.packs.retain(|pack| pack.id != entry.id);
+    registry.packs.push(entry.clone());
+    registry.packs.sort_by(|left, right| left.id.cmp(&right.id));
+    validate_registry(&registry)?;
+
+    if let Some(parent) = options.registry.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    write_json(&options.registry, &registry)?;
+
+    Ok(entry)
+}
+
 pub fn install_from_registry(
     options: InstallFromRegistryOptions,
 ) -> Result<InstalledPack, PackError> {
@@ -704,6 +746,15 @@ pub struct InstallFromRegistryOptions {
     pub store: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegistryAddOptions {
+    pub registry: PathBuf,
+    pub pack: PathBuf,
+    pub archive: PathBuf,
+    pub url: String,
+    pub generated_at: String,
+}
+
 fn validate_pack_id(id: &str) -> Result<(), PackError> {
     let valid = !id.is_empty()
         && id
@@ -805,6 +856,17 @@ fn verify_archive(path: &Path, bytes: u64, sha256: &str) -> Result<(), PackError
         )));
     }
     Ok(())
+}
+
+fn verify_archive_exists(path: &Path) -> Result<(), PackError> {
+    if path.is_file() {
+        Ok(())
+    } else {
+        Err(PackError::Invalid(format!(
+            "archive does not exist: {}",
+            path.display()
+        )))
+    }
 }
 
 fn archive_matches(path: &Path, bytes: u64, sha256: &str) -> Result<bool, PackError> {
@@ -1490,6 +1552,68 @@ mod tests {
         fs::remove_dir_all(registry_path.parent().unwrap()).ok();
         fs::remove_dir_all(cache).ok();
         fs::remove_dir_all(store).ok();
+    }
+
+    #[test]
+    fn registry_add_writes_bundle_entry_from_pack_manifest() {
+        let pack = temp_pack_dir("registry-add-pack");
+        let source = temp_pack_dir("registry-add-source").join("tiles.pmtiles");
+        let archive = temp_pack_dir("registry-add-archive").join("region.mapperpack.tar");
+        let registry_path = temp_pack_dir("registry-add").join("registry.json");
+
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"local tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        add_file_to_pack(AddFileOptions {
+            pack: pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("file should attach");
+        add_default_style_to_pack(&pack).expect("style should generate");
+        let archive = bundle_pack(BundleOptions {
+            pack: pack.clone(),
+            output: archive,
+        })
+        .expect("pack should bundle");
+
+        let entry = add_pack_to_registry(RegistryAddOptions {
+            registry: registry_path.clone(),
+            pack,
+            archive: archive.clone(),
+            url: "https://example.test/region.mapperpack.tar".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+        })
+        .expect("registry entry should write");
+
+        assert_eq!(entry.id, "region-pack");
+        assert_eq!(entry.bytes, fs::metadata(&archive).unwrap().len());
+        assert_eq!(entry.sha256, sha256_file(&archive).unwrap());
+
+        let registry = read_registry(&registry_path).expect("registry should read");
+        assert_eq!(registry.packs.len(), 1);
+        assert_eq!(
+            registry.packs[0].url,
+            "https://example.test/region.mapperpack.tar"
+        );
+
+        fs::remove_dir_all(source.parent().unwrap()).ok();
+        fs::remove_dir_all(archive.parent().unwrap()).ok();
+        fs::remove_dir_all(registry_path.parent().unwrap()).ok();
     }
 
     fn sample_manifest() -> Manifest {

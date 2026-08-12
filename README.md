@@ -113,6 +113,17 @@ cargo run -p mapper-pack -- bundle \
   --out target/region.mapperpack.tar
 ```
 
+Create or update a registry entry for a bundle:
+
+```bash
+cargo run -p mapper-pack -- registry-add \
+  --registry target/registry.json \
+  --pack target/region.mapperpack \
+  --archive target/region.mapperpack.tar \
+  --url https://example.test/packs/region.mapperpack.tar \
+  --generated-at 2026-08-12T00:00:00Z
+```
+
 Install a downloaded bundle:
 
 ```bash

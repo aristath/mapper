@@ -1,9 +1,9 @@
 use mapper_pack::{
-    add_default_style_to_pack, add_file_to_pack, bundle_pack, init_pack, inspect_pack,
-    install_bundle, install_from_registry, install_pack, list_installed_packs, read_registry,
-    required_toolchain, resolve_asset_path, runtime_config, unpack_bundle, AddFileOptions,
-    BundleOptions, InitOptions, InstallBundleOptions, InstallFromRegistryOptions, InstallOptions,
-    UnpackOptions,
+    add_default_style_to_pack, add_file_to_pack, add_pack_to_registry, bundle_pack, init_pack,
+    inspect_pack, install_bundle, install_from_registry, install_pack, list_installed_packs,
+    read_registry, required_toolchain, resolve_asset_path, runtime_config, unpack_bundle,
+    AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions, InstallFromRegistryOptions,
+    InstallOptions, RegistryAddOptions, UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -78,6 +78,14 @@ fn main() {
                     pack.id, pack.version, pack.name, pack.bytes, pack.url
                 );
             }
+            Ok(())
+        }),
+        "registry-add" => parse_registry_add(args.collect()).and_then(|options| {
+            let entry = add_pack_to_registry(options)?;
+            println!(
+                "registered {} {} ({} bytes)",
+                entry.id, entry.version, entry.bytes
+            );
             Ok(())
         }),
         "install-from-registry" => {
@@ -436,6 +444,44 @@ fn parse_install_from_registry(
     })
 }
 
+fn parse_registry_add(args: Vec<String>) -> Result<RegistryAddOptions, mapper_pack::PackError> {
+    let mut registry = None;
+    let mut pack = None;
+    let mut archive = None;
+    let mut url = None;
+    let mut generated_at = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--registry" => registry = Some(PathBuf::from(value)),
+            "--pack" => pack = Some(PathBuf::from(value)),
+            "--archive" => archive = Some(PathBuf::from(value)),
+            "--url" => url = Some(value),
+            "--generated-at" => generated_at = Some(value),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown registry-add option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok(RegistryAddOptions {
+        registry: required(registry, "--registry")?,
+        pack: required(pack, "--pack")?,
+        archive: required(archive, "--archive")?,
+        url: required(url, "--url")?,
+        generated_at: required(generated_at, "--generated-at")?,
+    })
+}
+
 fn parse_registry_arg(args: Vec<String>, command: &str) -> Result<PathBuf, mapper_pack::PackError> {
     let mut registry = None;
 
@@ -568,6 +614,7 @@ fn print_help() {
     println!("  mapper-pack unpack --archive <file.mapperpack.tar> --out <dir>");
     println!("  mapper-pack install-bundle --archive <file.mapperpack.tar> --store <dir>");
     println!("  mapper-pack registry-list --registry <registry.json>");
+    println!("  mapper-pack registry-add --registry <registry.json> --pack <dir> --archive <file.mapperpack.tar> --url <url> --generated-at <iso-date>");
     println!("  mapper-pack install-from-registry --registry <registry.json> --id <id> --cache <dir> --store <dir>");
     println!("  mapper-pack list --store <dir>");
     println!("  mapper-pack asset --pack <dir> --kind <kind>");
