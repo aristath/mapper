@@ -121,6 +121,23 @@ cargo run -p mapper-pack -- install-bundle \
   --store target/installed-packs
 ```
 
+List downloadable packs from a registry:
+
+```bash
+cargo run -p mapper-pack -- registry-list \
+  --registry target/registry.json
+```
+
+Download, verify, and install a pack from a registry:
+
+```bash
+cargo run -p mapper-pack -- install-from-registry \
+  --registry target/registry.json \
+  --id region \
+  --cache target/pack-cache \
+  --store target/installed-packs
+```
+
 List installed packs:
 
 ```bash

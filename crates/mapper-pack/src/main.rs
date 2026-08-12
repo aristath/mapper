@@ -1,8 +1,9 @@
 use mapper_pack::{
     add_default_style_to_pack, add_file_to_pack, bundle_pack, init_pack, inspect_pack,
-    install_bundle, install_pack, list_installed_packs, required_toolchain, resolve_asset_path,
-    runtime_config, unpack_bundle, AddFileOptions, BundleOptions, InitOptions,
-    InstallBundleOptions, InstallOptions, UnpackOptions,
+    install_bundle, install_from_registry, install_pack, list_installed_packs, read_registry,
+    required_toolchain, resolve_asset_path, runtime_config, unpack_bundle, AddFileOptions,
+    BundleOptions, InitOptions, InstallBundleOptions, InstallFromRegistryOptions, InstallOptions,
+    UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -69,6 +70,28 @@ fn main() {
             );
             Ok(())
         }),
+        "registry-list" => parse_registry_arg(args.collect(), "registry-list").and_then(|path| {
+            let registry = read_registry(&path)?;
+            for pack in registry.packs {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}",
+                    pack.id, pack.version, pack.name, pack.bytes, pack.url
+                );
+            }
+            Ok(())
+        }),
+        "install-from-registry" => {
+            parse_install_from_registry(args.collect()).and_then(|options| {
+                let installed = install_from_registry(options)?;
+                println!(
+                    "installed {} {} at {}",
+                    installed.id,
+                    installed.version,
+                    installed.path.display()
+                );
+                Ok(())
+            })
+        }
         "list" => parse_store(args.collect()).and_then(|store| {
             for pack in list_installed_packs(&store)? {
                 println!(
@@ -376,6 +399,67 @@ fn parse_install_bundle(args: Vec<String>) -> Result<InstallBundleOptions, mappe
     })
 }
 
+fn parse_install_from_registry(
+    args: Vec<String>,
+) -> Result<InstallFromRegistryOptions, mapper_pack::PackError> {
+    let mut registry = None;
+    let mut id = None;
+    let mut cache = None;
+    let mut store = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--registry" => registry = Some(PathBuf::from(value)),
+            "--id" => id = Some(value),
+            "--cache" => cache = Some(PathBuf::from(value)),
+            "--store" => store = Some(PathBuf::from(value)),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown install-from-registry option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok(InstallFromRegistryOptions {
+        registry: required(registry, "--registry")?,
+        id: required(id, "--id")?,
+        cache: required(cache, "--cache")?,
+        store: required(store, "--store")?,
+    })
+}
+
+fn parse_registry_arg(args: Vec<String>, command: &str) -> Result<PathBuf, mapper_pack::PackError> {
+    let mut registry = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--registry" => registry = Some(PathBuf::from(value)),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown {command} option: {flag}"
+                )));
+            }
+        }
+    }
+
+    required(registry, "--registry")
+}
+
 fn parse_store(args: Vec<String>) -> Result<PathBuf, mapper_pack::PackError> {
     let mut store = None;
 
@@ -483,6 +567,8 @@ fn print_help() {
     println!("  mapper-pack bundle --pack <dir> --out <file.mapperpack.tar>");
     println!("  mapper-pack unpack --archive <file.mapperpack.tar> --out <dir>");
     println!("  mapper-pack install-bundle --archive <file.mapperpack.tar> --store <dir>");
+    println!("  mapper-pack registry-list --registry <registry.json>");
+    println!("  mapper-pack install-from-registry --registry <registry.json> --id <id> --cache <dir> --store <dir>");
     println!("  mapper-pack list --store <dir>");
     println!("  mapper-pack asset --pack <dir> --kind <kind>");
     println!("  mapper-pack runtime-config --pack <dir>");

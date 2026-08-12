@@ -39,6 +39,16 @@ Current asset kinds:
 - `poi_index`
 - `gtfs`
 
+## Registry Contract
+
+A pack registry is a JSON file with `schema`, `generated_at`, and a `packs`
+array. Each pack entry declares `id`, `name`, `version`, `country`, `bbox`,
+download `url`, archive `bytes`, archive `sha256`, and advertised `features`.
+
+The app can use the registry to show downloadable regions. Installation must
+download the selected bundle into a cache, verify its byte size and SHA-256, then
+install the bundle through the normal pack installer.
+
 ## Draft Layout
 
 ```text

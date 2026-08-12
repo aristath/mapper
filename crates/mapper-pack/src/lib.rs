@@ -4,6 +4,7 @@ use std::fmt;
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -92,6 +93,26 @@ pub struct RuntimeAssets {
     pub search_index: Option<String>,
     pub poi_index: Option<String>,
     pub gtfs: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Registry {
+    pub schema: u32,
+    pub generated_at: String,
+    pub packs: Vec<RegistryPack>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RegistryPack {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub country: String,
+    pub bbox: [f64; 4],
+    pub url: String,
+    pub bytes: u64,
+    pub sha256: String,
+    pub features: Features,
 }
 
 #[derive(Debug)]
@@ -398,6 +419,44 @@ pub fn install_bundle(options: InstallBundleOptions) -> Result<InstalledPack, Pa
     }
 }
 
+pub fn read_registry(path: &Path) -> Result<Registry, PackError> {
+    let contents = fs::read_to_string(path)?;
+    let registry: Registry = serde_json::from_str(&contents)?;
+    validate_registry(&registry)?;
+    Ok(registry)
+}
+
+pub fn install_from_registry(
+    options: InstallFromRegistryOptions,
+) -> Result<InstalledPack, PackError> {
+    let registry = read_registry(&options.registry)?;
+    let pack = registry
+        .packs
+        .iter()
+        .find(|pack| pack.id == options.id)
+        .ok_or_else(|| PackError::Invalid(format!("registry has no pack id: {}", options.id)))?;
+
+    fs::create_dir_all(&options.cache)?;
+    let archive = options
+        .cache
+        .join(format!("{}-{}.mapperpack.tar", pack.id, pack.version));
+
+    if archive.exists() && !archive_matches(&archive, pack.bytes, &pack.sha256)? {
+        fs::remove_file(&archive)?;
+    }
+
+    if !archive.exists() {
+        fetch_url(&pack.url, &archive)?;
+    }
+
+    verify_archive(&archive, pack.bytes, &pack.sha256)?;
+
+    install_bundle(InstallBundleOptions {
+        archive,
+        store: options.store,
+    })
+}
+
 pub fn list_installed_packs(store: &Path) -> Result<Vec<InstalledPack>, PackError> {
     if !store.exists() {
         return Ok(Vec::new());
@@ -535,6 +594,63 @@ pub fn validate_manifest(manifest: &Manifest) -> Result<(), PackError> {
     Ok(())
 }
 
+pub fn validate_registry(registry: &Registry) -> Result<(), PackError> {
+    if registry.schema != 1 {
+        return Err(PackError::Invalid(format!(
+            "unsupported registry schema: {}",
+            registry.schema
+        )));
+    }
+    if registry.generated_at.trim().is_empty() {
+        return Err(PackError::Invalid(
+            "registry generated_at cannot be empty".to_string(),
+        ));
+    }
+
+    for pack in &registry.packs {
+        validate_pack_id(&pack.id)?;
+        validate_bbox(pack.bbox)?;
+        if pack.name.trim().is_empty() {
+            return Err(PackError::Invalid(format!(
+                "registry pack {} has empty name",
+                pack.id
+            )));
+        }
+        if pack.version.trim().is_empty() {
+            return Err(PackError::Invalid(format!(
+                "registry pack {} has empty version",
+                pack.id
+            )));
+        }
+        if pack.country.trim().is_empty() {
+            return Err(PackError::Invalid(format!(
+                "registry pack {} has empty country",
+                pack.id
+            )));
+        }
+        if pack.url.trim().is_empty() {
+            return Err(PackError::Invalid(format!(
+                "registry pack {} has empty url",
+                pack.id
+            )));
+        }
+        if pack.bytes == 0 {
+            return Err(PackError::Invalid(format!(
+                "registry pack {} has zero bytes",
+                pack.id
+            )));
+        }
+        if pack.sha256.len() != 64 || !pack.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(PackError::Invalid(format!(
+                "registry pack {} has invalid sha256",
+                pack.id
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct InitOptions {
     pub output: PathBuf,
@@ -577,6 +693,14 @@ pub struct UnpackOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstallBundleOptions {
     pub archive: PathBuf,
+    pub store: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstallFromRegistryOptions {
+    pub registry: PathBuf,
+    pub id: String,
+    pub cache: PathBuf,
     pub store: PathBuf,
 }
 
@@ -671,6 +795,55 @@ fn optional_asset_path(pack: &Path, kind: &str) -> Result<Option<String>, PackEr
     let path = resolve_asset_path(pack, kind)?;
     let resolved = fs::canonicalize(path)?;
     Ok(Some(resolved.to_string_lossy().to_string()))
+}
+
+fn verify_archive(path: &Path, bytes: u64, sha256: &str) -> Result<(), PackError> {
+    if !archive_matches(path, bytes, sha256)? {
+        return Err(PackError::Invalid(format!(
+            "downloaded archive failed integrity check: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn archive_matches(path: &Path, bytes: u64, sha256: &str) -> Result<bool, PackError> {
+    if !path.exists() {
+        return Ok(false);
+    }
+
+    let metadata = fs::metadata(path)?;
+    if metadata.len() != bytes {
+        return Ok(false);
+    }
+
+    Ok(sha256_file(path)? == sha256)
+}
+
+fn fetch_url(url: &str, output: &Path) -> Result<(), PackError> {
+    if let Some(path) = url.strip_prefix("file://") {
+        fs::copy(path, output)?;
+        return Ok(());
+    }
+
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        fs::copy(url, output)?;
+        return Ok(());
+    }
+
+    let status = Command::new("curl")
+        .arg("--fail")
+        .arg("--location")
+        .arg("--output")
+        .arg(output)
+        .arg(url)
+        .status()?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(PackError::Invalid(format!("curl failed for {url}")))
+    }
 }
 
 fn default_maplibre_style(manifest: &Manifest, tile_url: &str) -> serde_json::Value {
@@ -1227,6 +1400,95 @@ mod tests {
         fs::remove_dir_all(source.parent().unwrap()).ok();
         fs::remove_dir_all(archive.parent().unwrap()).ok();
         fs::remove_dir_all(unpacked).ok();
+        fs::remove_dir_all(store).ok();
+    }
+
+    #[test]
+    fn installs_pack_from_registry_file_url() {
+        let pack = temp_pack_dir("registry-pack");
+        let source = temp_pack_dir("registry-source").join("tiles.pmtiles");
+        let archive = temp_pack_dir("registry-archive").join("region.mapperpack.tar");
+        let registry_path = temp_pack_dir("registry").join("registry.json");
+        let cache = temp_pack_dir("registry-cache");
+        let store = temp_pack_dir("registry-store");
+
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::create_dir_all(registry_path.parent().expect("registry should have parent")).unwrap();
+        fs::write(&source, b"local tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        add_file_to_pack(AddFileOptions {
+            pack: pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("file should attach");
+        add_default_style_to_pack(&pack).expect("style should generate");
+
+        let archive = bundle_pack(BundleOptions {
+            pack,
+            output: archive,
+        })
+        .expect("pack should bundle");
+        let archive = fs::canonicalize(archive).expect("archive should canonicalize");
+        let bytes = fs::metadata(&archive).unwrap().len();
+        let sha256 = sha256_file(&archive).unwrap();
+
+        let registry = Registry {
+            schema: 1,
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            packs: vec![RegistryPack {
+                id: "region-pack".to_string(),
+                name: "Region Pack".to_string(),
+                version: "2026.08.12".to_string(),
+                country: "ZZ".to_string(),
+                bbox: [1.0, 2.0, 3.0, 4.0],
+                url: format!("file://{}", archive.display()),
+                bytes,
+                sha256,
+                features: Features {
+                    rendering: true,
+                    routing: Vec::new(),
+                    search: false,
+                    transit: false,
+                },
+            }],
+        };
+        write_json(&registry_path, &registry).unwrap();
+
+        let installed = install_from_registry(InstallFromRegistryOptions {
+            registry: registry_path.clone(),
+            id: "region-pack".to_string(),
+            cache: cache.clone(),
+            store: store.clone(),
+        })
+        .expect("registry pack should install");
+
+        assert_eq!(installed.id, "region-pack");
+        assert!(runtime_config(&installed.path)
+            .unwrap()
+            .assets
+            .style_json
+            .is_some());
+        assert!(cache.join("region-pack-2026.08.12.mapperpack.tar").exists());
+
+        fs::remove_dir_all(source.parent().unwrap()).ok();
+        fs::remove_dir_all(archive.parent().unwrap()).ok();
+        fs::remove_dir_all(registry_path.parent().unwrap()).ok();
+        fs::remove_dir_all(cache).ok();
         fs::remove_dir_all(store).ok();
     }
 
