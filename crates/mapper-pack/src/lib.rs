@@ -526,6 +526,36 @@ pub fn list_installed_packs(store: &Path) -> Result<Vec<InstalledPack>, PackErro
     Ok(packs)
 }
 
+pub fn uninstall_pack(options: UninstallOptions) -> Result<PathBuf, PackError> {
+    validate_pack_id(&options.id)?;
+
+    let target = options.store.join(&options.id);
+    if !target.exists() {
+        return Err(PackError::Invalid(format!(
+            "pack is not installed: {}",
+            options.id
+        )));
+    }
+    if !target.is_dir() {
+        return Err(PackError::Invalid(format!(
+            "installed pack path is not a directory: {}",
+            target.display()
+        )));
+    }
+
+    let manifest = read_manifest(&target.join("manifest.json"))?;
+    validate_manifest(&manifest)?;
+    if manifest.id != options.id {
+        return Err(PackError::Invalid(format!(
+            "installed pack id mismatch: expected {}, found {}",
+            options.id, manifest.id
+        )));
+    }
+
+    fs::remove_dir_all(&target)?;
+    Ok(target)
+}
+
 pub fn resolve_asset_path(pack: &Path, kind: &str) -> Result<PathBuf, PackError> {
     let manifest = read_manifest(&pack.join("manifest.json"))?;
     validate_manifest(&manifest)?;
@@ -753,6 +783,12 @@ pub struct RegistryAddOptions {
     pub archive: PathBuf,
     pub url: String,
     pub generated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UninstallOptions {
+    pub store: PathBuf,
+    pub id: String,
 }
 
 fn validate_pack_id(id: &str) -> Result<(), PackError> {
@@ -1311,6 +1347,58 @@ mod tests {
         let tiles =
             resolve_asset_path(&installed.path, "vector_tiles").expect("asset should resolve");
         assert!(tiles.ends_with("map/tiles.pmtiles"));
+
+        fs::remove_dir_all(pack).ok();
+        fs::remove_dir_all(store).ok();
+        fs::remove_dir_all(source.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn uninstalls_pack_by_id_from_store() {
+        let pack = temp_pack_dir("uninstall-pack");
+        let source = temp_pack_dir("uninstall-source").join("tiles.pmtiles");
+        let store = temp_pack_dir("uninstall-store");
+
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"local tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        add_file_to_pack(AddFileOptions {
+            pack: pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("file should attach");
+
+        let installed = install_pack(InstallOptions {
+            pack: pack.clone(),
+            store: store.clone(),
+        })
+        .expect("pack should install");
+        assert!(installed.path.exists());
+
+        let removed = uninstall_pack(UninstallOptions {
+            store: store.clone(),
+            id: "region-pack".to_string(),
+        })
+        .expect("pack should uninstall");
+
+        assert_eq!(removed, installed.path);
+        assert!(!removed.exists());
+        assert!(list_installed_packs(&store).unwrap().is_empty());
 
         fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(store).ok();

@@ -155,6 +155,14 @@ List installed packs:
 cargo run -p mapper-pack -- list --store target/installed-packs
 ```
 
+Remove an installed pack:
+
+```bash
+cargo run -p mapper-pack -- uninstall \
+  --store target/installed-packs \
+  --id region
+```
+
 Resolve the local path for an app asset:
 
 ```bash

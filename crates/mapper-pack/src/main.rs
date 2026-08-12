@@ -3,7 +3,7 @@ use mapper_pack::{
     inspect_pack, install_bundle, install_from_registry, install_pack, list_installed_packs,
     read_registry, required_toolchain, resolve_asset_path, runtime_config, unpack_bundle,
     AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions, InstallFromRegistryOptions,
-    InstallOptions, RegistryAddOptions, UnpackOptions,
+    InstallOptions, RegistryAddOptions, UninstallOptions, UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -110,6 +110,11 @@ fn main() {
                     pack.path.display()
                 );
             }
+            Ok(())
+        }),
+        "uninstall" => parse_uninstall(args.collect()).and_then(|options| {
+            let removed = mapper_pack::uninstall_pack(options)?;
+            println!("uninstalled {}", removed.display());
             Ok(())
         }),
         "asset" => parse_asset(args.collect()).and_then(|(pack, kind)| {
@@ -530,6 +535,35 @@ fn parse_store(args: Vec<String>) -> Result<PathBuf, mapper_pack::PackError> {
     required(store, "--store")
 }
 
+fn parse_uninstall(args: Vec<String>) -> Result<UninstallOptions, mapper_pack::PackError> {
+    let mut store = None;
+    let mut id = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--store" => store = Some(PathBuf::from(value)),
+            "--id" => id = Some(value),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown uninstall option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok(UninstallOptions {
+        store: required(store, "--store")?,
+        id: required(id, "--id")?,
+    })
+}
+
 fn parse_asset(args: Vec<String>) -> Result<(PathBuf, String), mapper_pack::PackError> {
     let mut pack = None;
     let mut kind = None;
@@ -617,6 +651,7 @@ fn print_help() {
     println!("  mapper-pack registry-add --registry <registry.json> --pack <dir> --archive <file.mapperpack.tar> --url <url> --generated-at <iso-date>");
     println!("  mapper-pack install-from-registry --registry <registry.json> --id <id> --cache <dir> --store <dir>");
     println!("  mapper-pack list --store <dir>");
+    println!("  mapper-pack uninstall --store <dir> --id <id>");
     println!("  mapper-pack asset --pack <dir> --kind <kind>");
     println!("  mapper-pack runtime-config --pack <dir>");
     println!("  mapper-pack toolchain");
