@@ -943,6 +943,37 @@ pub fn runtime_config(pack: &Path) -> Result<RuntimeConfig, PackError> {
     })
 }
 
+pub fn materialize_valhalla_runtime_config(
+    pack: &Path,
+    output: &Path,
+) -> Result<PathBuf, PackError> {
+    require_clean_inspection(&inspect_pack(pack)?)?;
+
+    let config_path = resolve_asset_path(pack, "valhalla_config")?;
+    let tiles_path = fs::canonicalize(resolve_asset_path(pack, "valhalla_tiles")?)?;
+    let mut config: serde_json::Value = serde_json::from_str(&fs::read_to_string(config_path)?)?;
+
+    config
+        .as_object_mut()
+        .ok_or_else(|| PackError::Invalid("valhalla config must be a JSON object".to_string()))?
+        .entry("mjolnir")
+        .or_insert_with(|| serde_json::json!({}));
+
+    config["mjolnir"]
+        .as_object_mut()
+        .ok_or_else(|| PackError::Invalid("valhalla config mjolnir must be an object".to_string()))?
+        .insert(
+            "tile_extract".to_string(),
+            serde_json::Value::String(tiles_path.to_string_lossy().to_string()),
+        );
+
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    write_json(output, &config)?;
+    Ok(output.to_path_buf())
+}
+
 pub fn read_manifest(path: &Path) -> Result<Manifest, PackError> {
     let contents = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&contents)?)
@@ -2254,7 +2285,21 @@ mod tests {
             "routing/valhalla_tiles.tar"
         );
 
+        let runtime_output = temp_pack_dir("valhalla-runtime-output").join("valhalla.json");
+        let runtime_output = materialize_valhalla_runtime_config(&pack, &runtime_output)
+            .expect("runtime valhalla config should materialize");
+        let runtime_json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&runtime_output).unwrap()).unwrap();
+        assert_eq!(
+            runtime_json["mjolnir"]["tile_extract"],
+            fs::canonicalize(pack.join("routing/valhalla_tiles.tar"))
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        );
+
         fs::remove_dir_all(pack).ok();
+        fs::remove_dir_all(runtime_output.parent().unwrap()).ok();
         fs::remove_dir_all(source.parent().unwrap()).ok();
     }
 

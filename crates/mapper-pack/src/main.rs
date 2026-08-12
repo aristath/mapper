@@ -2,11 +2,11 @@ use mapper_pack::{
     active_pack, active_runtime_config, add_default_style_to_pack,
     add_default_valhalla_config_to_pack, add_file_to_pack, add_pack_to_registry, bundle_pack,
     init_pack, inspect_pack, install_bundle, install_from_registry, install_pack,
-    list_installed_packs, read_registry, registry_status, required_toolchain, resolve_asset_path,
-    runtime_config, set_active_pack, set_active_pack_at, store_snapshot, unpack_bundle,
-    update_from_registry, AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions,
-    InstallFromRegistryOptions, InstallOptions, RegistryAddOptions, UninstallOptions,
-    UnpackOptions,
+    list_installed_packs, materialize_valhalla_runtime_config, read_registry, registry_status,
+    required_toolchain, resolve_asset_path, runtime_config, set_active_pack, set_active_pack_at,
+    store_snapshot, unpack_bundle, update_from_registry, AddFileOptions, BundleOptions,
+    InitOptions, InstallBundleOptions, InstallFromRegistryOptions, InstallOptions,
+    RegistryAddOptions, UninstallOptions, UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -184,6 +184,12 @@ fn main() {
             println!("{}", serde_json::to_string_pretty(&config)?);
             Ok(())
         }),
+        "valhalla-runtime-config" => parse_pack_out(args.collect(), "valhalla-runtime-config")
+            .and_then(|(pack, output)| {
+                let output = materialize_valhalla_runtime_config(&pack, &output)?;
+                println!("{}", output.display());
+                Ok(())
+            }),
         "active-runtime-config" => parse_store_for_command(args.collect(), "active-runtime-config")
             .and_then(|store| {
                 let config = active_runtime_config(&store)?;
@@ -793,6 +799,35 @@ fn parse_pack_arg(args: Vec<String>, command: &str) -> Result<PathBuf, mapper_pa
     required(pack, "--pack")
 }
 
+fn parse_pack_out(
+    args: Vec<String>,
+    command: &str,
+) -> Result<(PathBuf, PathBuf), mapper_pack::PackError> {
+    let mut pack = None;
+    let mut output = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--pack" => pack = Some(PathBuf::from(value)),
+            "--out" => output = Some(PathBuf::from(value)),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown {command} option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok((required(pack, "--pack")?, required(output, "--out")?))
+}
+
 fn parse_bbox(value: &str) -> Result<[f64; 4], mapper_pack::PackError> {
     let parts: Vec<&str> = value.split(',').collect();
     if parts.len() != 4 {
@@ -857,6 +892,7 @@ fn print_help() {
     println!("  mapper-pack active-get --store <dir>");
     println!("  mapper-pack asset --pack <dir> --kind <kind>");
     println!("  mapper-pack runtime-config --pack <dir>");
+    println!("  mapper-pack valhalla-runtime-config --pack <dir> --out <valhalla.json>");
     println!("  mapper-pack active-runtime-config --store <dir>");
     println!("  mapper-pack store-snapshot --store <dir>");
     println!("  mapper-pack covering --store <dir> --lon <lon> --lat <lat>");

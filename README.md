@@ -115,6 +115,14 @@ cargo run -p mapper-pack -- add-default-valhalla-config \
   --pack target/region.mapperpack
 ```
 
+Materialize a Valhalla runtime config with local absolute paths:
+
+```bash
+cargo run -p mapper-pack -- valhalla-runtime-config \
+  --pack target/region.mapperpack \
+  --out target/valhalla-runtime/region.json
+```
+
 Install a pack into a local pack store:
 
 ```bash

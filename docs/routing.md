@@ -28,6 +28,8 @@ Each routing-capable pack declares both `valhalla_tiles` and
 `valhalla_config`. The config is generated inside the pack and points Valhalla at
 the local tile archive, so app code can launch routing from resolved local asset
 paths instead of guessing filenames.
+Before launching Valhalla, Mapper materializes a runtime config that rewrites
+`mjolnir.tile_extract` to the absolute installed tile archive path.
 
 Mapper should provide:
 
