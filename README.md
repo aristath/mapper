@@ -139,6 +139,14 @@ cargo run -p mapper-pack -- registry-list \
   --registry target/registry.json
 ```
 
+Compare a registry with the local installed pack store:
+
+```bash
+cargo run -p mapper-pack -- registry-status \
+  --registry target/registry.json \
+  --store target/installed-packs
+```
+
 Download, verify, and install a pack from a registry:
 
 ```bash

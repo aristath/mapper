@@ -131,6 +131,27 @@ pub struct RegistryPack {
     pub features: Features,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RegistryStatus {
+    pub registry_generated_at: String,
+    pub packs: Vec<RegistryPackStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RegistryPackStatus {
+    pub id: String,
+    pub name: String,
+    pub registry_version: String,
+    pub installed_version: Option<String>,
+    pub installed: bool,
+    pub update_available: bool,
+    pub active: bool,
+    pub country: String,
+    pub bbox: [f64; 4],
+    pub bytes: u64,
+    pub features: Features,
+}
+
 #[derive(Debug)]
 pub enum PackError {
     Io(std::io::Error),
@@ -444,10 +465,48 @@ pub fn read_registry(path: &Path) -> Result<Registry, PackError> {
     Ok(registry)
 }
 
+pub fn registry_status(registry_path: &Path, store: &Path) -> Result<RegistryStatus, PackError> {
+    let registry = read_registry(registry_path)?;
+    let installed = list_installed_packs(store)?;
+    let active_id = read_active_selection(store)
+        .ok()
+        .map(|selection| selection.id);
+
+    let mut packs = Vec::new();
+    for pack in &registry.packs {
+        let installed_pack = installed.iter().find(|installed| installed.id == pack.id);
+        let installed_version = installed_pack.map(|installed| installed.version.clone());
+        let update_available = installed_version
+            .as_ref()
+            .map(|version| version != &pack.version)
+            .unwrap_or(false);
+
+        packs.push(RegistryPackStatus {
+            id: pack.id.clone(),
+            name: pack.name.clone(),
+            registry_version: pack.version.clone(),
+            installed_version,
+            installed: installed_pack.is_some(),
+            update_available,
+            active: active_id.as_ref() == Some(&pack.id),
+            country: pack.country.clone(),
+            bbox: pack.bbox,
+            bytes: pack.bytes,
+            features: pack.features.clone(),
+        });
+    }
+
+    Ok(RegistryStatus {
+        registry_generated_at: registry.generated_at,
+        packs,
+    })
+}
+
 pub fn add_pack_to_registry(options: RegistryAddOptions) -> Result<RegistryPack, PackError> {
     let inspection = inspect_pack(&options.pack)?;
     require_clean_inspection(&inspection)?;
     verify_archive_exists(&options.archive)?;
+    verify_archive_contains_manifest(&options.archive, &inspection.manifest)?;
 
     let mut registry = if options.registry.exists() {
         read_registry(&options.registry)?
@@ -1173,6 +1232,29 @@ fn verify_archive_exists(path: &Path) -> Result<(), PackError> {
     }
 }
 
+fn verify_archive_contains_manifest(archive: &Path, manifest: &Manifest) -> Result<(), PackError> {
+    let temp = std::env::temp_dir().join(format!("mapper-pack-verify-{}", unique_suffix()));
+
+    let result = unpack_bundle(UnpackOptions {
+        archive: archive.to_path_buf(),
+        output: temp.clone(),
+    })
+    .and_then(|_| inspect_pack(&temp))
+    .and_then(|inspection| {
+        require_clean_inspection(&inspection)?;
+        if inspection.manifest != *manifest {
+            return Err(PackError::Invalid(format!(
+                "archive manifest does not match pack: {}",
+                archive.display()
+            )));
+        }
+        Ok(())
+    });
+
+    fs::remove_dir_all(&temp).ok();
+    result
+}
+
 fn archive_matches(path: &Path, bytes: u64, sha256: &str) -> Result<bool, PackError> {
     if !path.exists() {
         return Ok(false);
@@ -1793,6 +1875,105 @@ mod tests {
     }
 
     #[test]
+    fn registry_status_reports_install_and_update_state() {
+        let pack = temp_pack_dir("registry-status-pack");
+        let registry_path = temp_pack_dir("registry-status").join("registry.json");
+        let store = temp_pack_dir("registry-status-store");
+
+        fs::create_dir_all(registry_path.parent().expect("registry should have parent")).unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+        install_pack(InstallOptions {
+            pack: pack.clone(),
+            store: store.clone(),
+        })
+        .expect("pack should install");
+        set_active_pack(&store, "region-pack").expect("active pack should set");
+
+        write_json(
+            &registry_path,
+            &Registry {
+                schema: 1,
+                generated_at: "2026-08-13T00:00:00Z".to_string(),
+                packs: vec![
+                    RegistryPack {
+                        id: "other-region".to_string(),
+                        name: "Other Region".to_string(),
+                        version: "2026.08.12".to_string(),
+                        country: "ZZ".to_string(),
+                        bbox: [5.0, 6.0, 7.0, 8.0],
+                        url: "file:///tmp/other-region.mapperpack.tar".to_string(),
+                        bytes: 10,
+                        sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .to_string(),
+                        features: Features {
+                            rendering: true,
+                            routing: Vec::new(),
+                            search: false,
+                            transit: false,
+                        },
+                    },
+                    RegistryPack {
+                        id: "region-pack".to_string(),
+                        name: "Region Pack".to_string(),
+                        version: "2026.08.13".to_string(),
+                        country: "ZZ".to_string(),
+                        bbox: [1.0, 2.0, 3.0, 4.0],
+                        url: "file:///tmp/region-pack.mapperpack.tar".to_string(),
+                        bytes: 10,
+                        sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                            .to_string(),
+                        features: Features {
+                            rendering: true,
+                            routing: Vec::new(),
+                            search: false,
+                            transit: false,
+                        },
+                    },
+                ],
+            },
+        )
+        .unwrap();
+
+        let status = registry_status(&registry_path, &store).expect("status should build");
+        assert_eq!(status.registry_generated_at, "2026-08-13T00:00:00Z");
+        assert_eq!(status.packs.len(), 2);
+
+        let other = status
+            .packs
+            .iter()
+            .find(|pack| pack.id == "other-region")
+            .unwrap();
+        assert!(!other.installed);
+        assert!(!other.update_available);
+        assert!(!other.active);
+
+        let installed = status
+            .packs
+            .iter()
+            .find(|pack| pack.id == "region-pack")
+            .unwrap();
+        assert!(installed.installed);
+        assert_eq!(installed.installed_version.as_deref(), Some("2026.08.12"));
+        assert!(installed.update_available);
+        assert!(installed.active);
+
+        fs::remove_dir_all(pack).ok();
+        fs::remove_dir_all(registry_path.parent().unwrap()).ok();
+        fs::remove_dir_all(store).ok();
+    }
+
+    #[test]
     fn covering_packs_selects_smallest_region_for_position() {
         let small_pack = temp_pack_dir("covering-small-pack");
         let large_pack = temp_pack_dir("covering-large-pack");
@@ -2305,6 +2486,62 @@ mod tests {
         );
 
         fs::remove_dir_all(source.parent().unwrap()).ok();
+        fs::remove_dir_all(archive.parent().unwrap()).ok();
+        fs::remove_dir_all(registry_path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn registry_add_rejects_archive_for_different_pack() {
+        let pack = temp_pack_dir("registry-add-mismatch-pack");
+        let other_pack = temp_pack_dir("registry-add-mismatch-other-pack");
+        let archive = temp_pack_dir("registry-add-mismatch-archive").join("other.mapperpack.tar");
+        let registry_path = temp_pack_dir("registry-add-mismatch").join("registry.json");
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        init_pack(InitOptions {
+            output: other_pack.clone(),
+            id: "other-pack".to_string(),
+            name: "Other Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [5.0, 6.0, 7.0, 8.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "other.osm.pbf".to_string(),
+        })
+        .expect("other pack should initialize");
+
+        let archive = bundle_pack(BundleOptions {
+            pack: other_pack.clone(),
+            output: archive,
+        })
+        .expect("other pack should bundle");
+
+        let error = add_pack_to_registry(RegistryAddOptions {
+            registry: registry_path.clone(),
+            pack: pack.clone(),
+            archive: archive.clone(),
+            url: "https://example.test/other.mapperpack.tar".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+        })
+        .expect_err("mismatched archive should fail");
+
+        assert!(error
+            .to_string()
+            .contains("archive manifest does not match"));
+
+        fs::remove_dir_all(pack).ok();
+        fs::remove_dir_all(other_pack).ok();
         fs::remove_dir_all(archive.parent().unwrap()).ok();
         fs::remove_dir_all(registry_path.parent().unwrap()).ok();
     }

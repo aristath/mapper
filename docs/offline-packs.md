@@ -54,6 +54,8 @@ download `url`, archive `bytes`, archive `sha256`, and advertised `features`.
 The app can use the registry to show downloadable regions. Installation must
 download the selected bundle into a cache, verify its byte size and SHA-256, then
 install the bundle through the normal pack installer.
+Registry status combines downloadable pack metadata with the local store so the
+app can show installed, update available, active, and not installed states.
 
 Updates use the same registry verification path, unpack into a temporary store
 directory, validate the bundle, confirm the manifest id matches the requested
