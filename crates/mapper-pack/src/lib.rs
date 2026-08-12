@@ -471,32 +471,37 @@ pub fn add_pack_to_registry(options: RegistryAddOptions) -> Result<RegistryPack,
 pub fn install_from_registry(
     options: InstallFromRegistryOptions,
 ) -> Result<InstalledPack, PackError> {
-    let registry = read_registry(&options.registry)?;
-    let pack = registry
-        .packs
-        .iter()
-        .find(|pack| pack.id == options.id)
-        .ok_or_else(|| PackError::Invalid(format!("registry has no pack id: {}", options.id)))?;
-
-    fs::create_dir_all(&options.cache)?;
-    let archive = options
-        .cache
-        .join(format!("{}-{}.mapperpack.tar", pack.id, pack.version));
-
-    if archive.exists() && !archive_matches(&archive, pack.bytes, &pack.sha256)? {
-        fs::remove_file(&archive)?;
-    }
-
-    if !archive.exists() {
-        fetch_url(&pack.url, &archive)?;
-    }
-
-    verify_archive(&archive, pack.bytes, &pack.sha256)?;
+    let archive = fetch_registry_archive(&options)?;
 
     install_bundle(InstallBundleOptions {
         archive,
         store: options.store,
     })
+}
+
+pub fn update_from_registry(
+    options: InstallFromRegistryOptions,
+) -> Result<InstalledPack, PackError> {
+    let archive = fetch_registry_archive(&options)?;
+
+    fs::create_dir_all(&options.store)?;
+    let temp = options.store.join(format!(".incoming-{}", unique_suffix()));
+    let result = unpack_bundle(UnpackOptions {
+        archive,
+        output: temp.clone(),
+    })
+    .and_then(|_| replace_installed_pack(&temp, &options.store, &options.id));
+
+    match result {
+        Ok(installed) => {
+            fs::remove_dir_all(&temp).ok();
+            Ok(installed)
+        }
+        Err(error) => {
+            fs::remove_dir_all(&temp).ok();
+            Err(error)
+        }
+    }
 }
 
 pub fn list_installed_packs(store: &Path) -> Result<Vec<InstalledPack>, PackError> {
@@ -554,6 +559,80 @@ pub fn uninstall_pack(options: UninstallOptions) -> Result<PathBuf, PackError> {
 
     fs::remove_dir_all(&target)?;
     Ok(target)
+}
+
+fn fetch_registry_archive(options: &InstallFromRegistryOptions) -> Result<PathBuf, PackError> {
+    let registry = read_registry(&options.registry)?;
+    let pack = registry
+        .packs
+        .iter()
+        .find(|pack| pack.id == options.id)
+        .ok_or_else(|| PackError::Invalid(format!("registry has no pack id: {}", options.id)))?;
+
+    fs::create_dir_all(&options.cache)?;
+    let archive = options
+        .cache
+        .join(format!("{}-{}.mapperpack.tar", pack.id, pack.version));
+
+    if archive.exists() && !archive_matches(&archive, pack.bytes, &pack.sha256)? {
+        fs::remove_file(&archive)?;
+    }
+
+    if !archive.exists() {
+        fetch_url(&pack.url, &archive)?;
+    }
+
+    verify_archive(&archive, pack.bytes, &pack.sha256)?;
+    Ok(archive)
+}
+
+fn replace_installed_pack(
+    unpacked: &Path,
+    store: &Path,
+    expected_id: &str,
+) -> Result<InstalledPack, PackError> {
+    validate_pack_id(expected_id)?;
+    let inspection = inspect_pack(unpacked)?;
+    require_clean_inspection(&inspection)?;
+
+    if inspection.manifest.id != expected_id {
+        return Err(PackError::Invalid(format!(
+            "registry pack id mismatch: expected {}, found {}",
+            expected_id, inspection.manifest.id
+        )));
+    }
+
+    let target = store.join(expected_id);
+    if !target.exists() {
+        return Err(PackError::Invalid(format!(
+            "pack is not installed: {expected_id}"
+        )));
+    }
+    if !target.is_dir() {
+        return Err(PackError::Invalid(format!(
+            "installed pack path is not a directory: {}",
+            target.display()
+        )));
+    }
+
+    let installed_manifest = read_manifest(&target.join("manifest.json"))?;
+    validate_manifest(&installed_manifest)?;
+    if installed_manifest.id != expected_id {
+        return Err(PackError::Invalid(format!(
+            "installed pack id mismatch: expected {}, found {}",
+            expected_id, installed_manifest.id
+        )));
+    }
+
+    fs::remove_dir_all(&target)?;
+    fs::rename(unpacked, &target)?;
+
+    Ok(InstalledPack {
+        id: inspection.manifest.id,
+        name: inspection.manifest.name,
+        version: inspection.manifest.version,
+        path: target,
+    })
 }
 
 pub fn resolve_asset_path(pack: &Path, kind: &str) -> Result<PathBuf, PackError> {
@@ -1637,6 +1716,166 @@ mod tests {
 
         fs::remove_dir_all(source.parent().unwrap()).ok();
         fs::remove_dir_all(archive.parent().unwrap()).ok();
+        fs::remove_dir_all(registry_path.parent().unwrap()).ok();
+        fs::remove_dir_all(cache).ok();
+        fs::remove_dir_all(store).ok();
+    }
+
+    #[test]
+    fn updates_installed_pack_from_registry() {
+        let pack_v1 = temp_pack_dir("registry-update-pack-v1");
+        let pack_v2 = temp_pack_dir("registry-update-pack-v2");
+        let source_v1 = temp_pack_dir("registry-update-source-v1").join("tiles.pmtiles");
+        let source_v2 = temp_pack_dir("registry-update-source-v2").join("tiles.pmtiles");
+        let archive_v1 = temp_pack_dir("registry-update-archive-v1").join("region.mapperpack.tar");
+        let archive_v2 = temp_pack_dir("registry-update-archive-v2").join("region.mapperpack.tar");
+        let registry_path = temp_pack_dir("registry-update").join("registry.json");
+        let cache = temp_pack_dir("registry-update-cache");
+        let store = temp_pack_dir("registry-update-store");
+
+        fs::create_dir_all(source_v1.parent().expect("source should have parent")).unwrap();
+        fs::create_dir_all(source_v2.parent().expect("source should have parent")).unwrap();
+        fs::create_dir_all(registry_path.parent().expect("registry should have parent")).unwrap();
+        fs::write(&source_v1, b"v1 tile bytes").unwrap();
+        fs::write(&source_v2, b"v2 tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack_v1.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("v1 pack should initialize");
+        add_file_to_pack(AddFileOptions {
+            pack: pack_v1.clone(),
+            source: source_v1.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("v1 file should attach");
+        add_default_style_to_pack(&pack_v1).expect("v1 style should generate");
+
+        init_pack(InitOptions {
+            output: pack_v2.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.13".to_string(),
+            generated_at: "2026-08-13T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("v2 pack should initialize");
+        add_file_to_pack(AddFileOptions {
+            pack: pack_v2.clone(),
+            source: source_v2.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("v2 file should attach");
+        add_default_style_to_pack(&pack_v2).expect("v2 style should generate");
+
+        let archive_v1 = fs::canonicalize(
+            bundle_pack(BundleOptions {
+                pack: pack_v1,
+                output: archive_v1,
+            })
+            .expect("v1 pack should bundle"),
+        )
+        .expect("v1 archive should canonicalize");
+        let archive_v2 = fs::canonicalize(
+            bundle_pack(BundleOptions {
+                pack: pack_v2,
+                output: archive_v2,
+            })
+            .expect("v2 pack should bundle"),
+        )
+        .expect("v2 archive should canonicalize");
+
+        write_json(
+            &registry_path,
+            &Registry {
+                schema: 1,
+                generated_at: "2026-08-12T00:00:00Z".to_string(),
+                packs: vec![RegistryPack {
+                    id: "region-pack".to_string(),
+                    name: "Region Pack".to_string(),
+                    version: "2026.08.12".to_string(),
+                    country: "ZZ".to_string(),
+                    bbox: [1.0, 2.0, 3.0, 4.0],
+                    url: format!("file://{}", archive_v1.display()),
+                    bytes: fs::metadata(&archive_v1).unwrap().len(),
+                    sha256: sha256_file(&archive_v1).unwrap(),
+                    features: Features {
+                        rendering: true,
+                        routing: Vec::new(),
+                        search: false,
+                        transit: false,
+                    },
+                }],
+            },
+        )
+        .unwrap();
+
+        install_from_registry(InstallFromRegistryOptions {
+            registry: registry_path.clone(),
+            id: "region-pack".to_string(),
+            cache: cache.clone(),
+            store: store.clone(),
+        })
+        .expect("v1 should install");
+
+        write_json(
+            &registry_path,
+            &Registry {
+                schema: 1,
+                generated_at: "2026-08-13T00:00:00Z".to_string(),
+                packs: vec![RegistryPack {
+                    id: "region-pack".to_string(),
+                    name: "Region Pack".to_string(),
+                    version: "2026.08.13".to_string(),
+                    country: "ZZ".to_string(),
+                    bbox: [1.0, 2.0, 3.0, 4.0],
+                    url: format!("file://{}", archive_v2.display()),
+                    bytes: fs::metadata(&archive_v2).unwrap().len(),
+                    sha256: sha256_file(&archive_v2).unwrap(),
+                    features: Features {
+                        rendering: true,
+                        routing: Vec::new(),
+                        search: false,
+                        transit: false,
+                    },
+                }],
+            },
+        )
+        .unwrap();
+
+        let installed = update_from_registry(InstallFromRegistryOptions {
+            registry: registry_path.clone(),
+            id: "region-pack".to_string(),
+            cache: cache.clone(),
+            store: store.clone(),
+        })
+        .expect("v2 should update");
+
+        assert_eq!(installed.version, "2026.08.13");
+        assert_eq!(
+            fs::read(resolve_asset_path(&installed.path, "vector_tiles").unwrap()).unwrap(),
+            b"v2 tile bytes"
+        );
+        assert!(cache.join("region-pack-2026.08.12.mapperpack.tar").exists());
+        assert!(cache.join("region-pack-2026.08.13.mapperpack.tar").exists());
+
+        fs::remove_dir_all(source_v1.parent().unwrap()).ok();
+        fs::remove_dir_all(source_v2.parent().unwrap()).ok();
+        fs::remove_dir_all(archive_v1.parent().unwrap()).ok();
+        fs::remove_dir_all(archive_v2.parent().unwrap()).ok();
         fs::remove_dir_all(registry_path.parent().unwrap()).ok();
         fs::remove_dir_all(cache).ok();
         fs::remove_dir_all(store).ok();

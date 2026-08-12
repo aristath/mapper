@@ -149,6 +149,16 @@ cargo run -p mapper-pack -- install-from-registry \
   --store target/installed-packs
 ```
 
+Download, verify, and replace an installed pack from a registry:
+
+```bash
+cargo run -p mapper-pack -- update-from-registry \
+  --registry target/registry.json \
+  --id region \
+  --cache target/pack-cache \
+  --store target/installed-packs
+```
+
 List installed packs:
 
 ```bash

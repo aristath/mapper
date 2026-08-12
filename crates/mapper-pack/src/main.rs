@@ -2,8 +2,9 @@ use mapper_pack::{
     add_default_style_to_pack, add_file_to_pack, add_pack_to_registry, bundle_pack, init_pack,
     inspect_pack, install_bundle, install_from_registry, install_pack, list_installed_packs,
     read_registry, required_toolchain, resolve_asset_path, runtime_config, unpack_bundle,
-    AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions, InstallFromRegistryOptions,
-    InstallOptions, RegistryAddOptions, UninstallOptions, UnpackOptions,
+    update_from_registry, AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions,
+    InstallFromRegistryOptions, InstallOptions, RegistryAddOptions, UninstallOptions,
+    UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -100,6 +101,16 @@ fn main() {
                 Ok(())
             })
         }
+        "update-from-registry" => parse_install_from_registry(args.collect()).and_then(|options| {
+            let installed = update_from_registry(options)?;
+            println!(
+                "updated {} {} at {}",
+                installed.id,
+                installed.version,
+                installed.path.display()
+            );
+            Ok(())
+        }),
         "list" => parse_store(args.collect()).and_then(|store| {
             for pack in list_installed_packs(&store)? {
                 println!(
@@ -650,6 +661,7 @@ fn print_help() {
     println!("  mapper-pack registry-list --registry <registry.json>");
     println!("  mapper-pack registry-add --registry <registry.json> --pack <dir> --archive <file.mapperpack.tar> --url <url> --generated-at <iso-date>");
     println!("  mapper-pack install-from-registry --registry <registry.json> --id <id> --cache <dir> --store <dir>");
+    println!("  mapper-pack update-from-registry --registry <registry.json> --id <id> --cache <dir> --store <dir>");
     println!("  mapper-pack list --store <dir>");
     println!("  mapper-pack uninstall --store <dir> --id <id>");
     println!("  mapper-pack asset --pack <dir> --kind <kind>");
