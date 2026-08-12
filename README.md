@@ -54,3 +54,15 @@ Inspect a pack:
 ```bash
 cargo run -p mapper-pack -- inspect target/athens-metro.mapperpack
 ```
+
+Check whether the external open-source pack builders are installed:
+
+```bash
+cargo run -p mapper-pack -- toolchain
+```
+
+Download the Greece OpenStreetMap extract for the first Athens spike:
+
+```bash
+scripts/download-greece-extract.sh
+```

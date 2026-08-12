@@ -167,6 +167,32 @@ pub fn read_manifest(path: &Path) -> Result<Manifest, PackError> {
     Ok(serde_json::from_str(&contents)?)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tool {
+    pub name: &'static str,
+    pub purpose: &'static str,
+    pub found_at: Option<PathBuf>,
+}
+
+pub fn required_toolchain() -> Vec<Tool> {
+    [
+        ("osmium", "clip and inspect OpenStreetMap extracts"),
+        ("tilemaker", "build local vector tiles from OSM data"),
+        (
+            "valhalla_build_tiles",
+            "build offline Valhalla routing graph tiles",
+        ),
+        ("pmtiles", "package vector tiles for offline map rendering"),
+    ]
+    .into_iter()
+    .map(|(name, purpose)| Tool {
+        name,
+        purpose,
+        found_at: find_executable(name),
+    })
+    .collect()
+}
+
 pub fn validate_manifest(manifest: &Manifest) -> Result<(), PackError> {
     if manifest.schema != 1 {
         return Err(PackError::Invalid(format!(
@@ -256,6 +282,17 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), PackError> {
     Ok(())
 }
 
+fn find_executable(name: &str) -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&paths) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,6 +337,16 @@ mod tests {
         manifest.features.rendering = true;
         assert!(validate_manifest(&manifest).is_ok());
         assert!(!declares_kind(&manifest, "vector_tiles"));
+    }
+
+    #[test]
+    fn toolchain_contract_names_external_builders() {
+        let names: Vec<&str> = required_toolchain().iter().map(|tool| tool.name).collect();
+
+        assert_eq!(
+            names,
+            vec!["osmium", "tilemaker", "valhalla_build_tiles", "pmtiles"]
+        );
     }
 
     fn sample_manifest() -> Manifest {

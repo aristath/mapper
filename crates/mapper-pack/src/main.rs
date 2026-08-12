@@ -1,4 +1,4 @@
-use mapper_pack::{init_pack, inspect_pack, InitOptions};
+use mapper_pack::{init_pack, inspect_pack, required_toolchain, InitOptions};
 use std::path::{Path, PathBuf};
 
 fn main() {
@@ -22,6 +22,10 @@ fn main() {
 
             inspect_command(Path::new(&path))
         }
+        "toolchain" => {
+            toolchain_command();
+            Ok(())
+        }
         "help" | "--help" | "-h" => {
             print_help();
             Ok(())
@@ -37,6 +41,28 @@ fn main() {
         eprintln!("error: {error}");
         std::process::exit(1);
     };
+}
+
+fn toolchain_command() {
+    let tools = required_toolchain();
+    let missing = tools.iter().filter(|tool| tool.found_at.is_none()).count();
+
+    for tool in tools {
+        match tool.found_at {
+            Some(path) => println!(
+                "ok      {:22} {} ({})",
+                tool.name,
+                tool.purpose,
+                path.display()
+            ),
+            None => println!("missing {:22} {}", tool.name, tool.purpose),
+        }
+    }
+
+    if missing > 0 {
+        println!();
+        println!("{missing} required builder tool(s) missing");
+    }
 }
 
 fn inspect_command(path: &Path) -> Result<(), mapper_pack::PackError> {
@@ -148,4 +174,5 @@ fn print_help() {
     println!("Usage:");
     println!("  mapper-pack init --out <dir> --id <id> --name <name> --country <code> --bbox <min_lon,min_lat,max_lon,max_lat> --version <version> --generated-at <iso-date> --osm-extract <file>");
     println!("  mapper-pack inspect <pack-path>");
+    println!("  mapper-pack toolchain");
 }

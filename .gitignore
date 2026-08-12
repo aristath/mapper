@@ -13,5 +13,5 @@ build/
 *.sqlite
 *.sqlite3
 *.osm.pbf
+data/sources/
 *.gtfs.zip
-
