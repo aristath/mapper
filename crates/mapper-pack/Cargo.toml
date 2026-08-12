@@ -3,7 +3,7 @@ name = "mapper-pack"
 version = "0.1.0"
 edition = "2021"
 description = "Offline city-pack tooling for Mapper"
+license = "GPL-2.0-only"
 publish = false
 
 [dependencies]
-
