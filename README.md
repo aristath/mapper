@@ -123,6 +123,18 @@ cargo run -p mapper-pack -- valhalla-runtime-config \
   --out target/valhalla-runtime/region.json
 ```
 
+Emit a validated Valhalla route request for a pack:
+
+```bash
+cargo run -p mapper-pack -- route-request \
+  --pack target/region.mapperpack \
+  --from-lon 1.5 \
+  --from-lat 2.5 \
+  --to-lon 2.5 \
+  --to-lat 3.5 \
+  --mode walking
+```
+
 Install a pack into a local pack store:
 
 ```bash
@@ -259,6 +271,18 @@ Emit runtime JSON for the selected installed pack:
 ```bash
 cargo run -p mapper-pack -- active-runtime-config \
   --store target/installed-packs
+```
+
+Emit a validated Valhalla route request for the selected installed pack:
+
+```bash
+cargo run -p mapper-pack -- active-route-request \
+  --store target/installed-packs \
+  --from-lon 1.5 \
+  --from-lat 2.5 \
+  --to-lon 2.5 \
+  --to-lat 3.5 \
+  --mode walking
 ```
 
 Emit one app-facing JSON snapshot of the local pack store:

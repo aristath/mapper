@@ -105,6 +105,18 @@ pub struct RuntimeAssets {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RouteLocation {
+    pub lon: f64,
+    pub lat: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ValhallaRouteRequest {
+    pub locations: Vec<RouteLocation>,
+    pub costing: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoreSnapshot {
     pub installed: Vec<InstalledPack>,
     pub active: Option<InstalledPack>,
@@ -974,6 +986,56 @@ pub fn materialize_valhalla_runtime_config(
     Ok(output.to_path_buf())
 }
 
+pub fn route_request(
+    pack: &Path,
+    from_lon: f64,
+    from_lat: f64,
+    to_lon: f64,
+    to_lat: f64,
+    mode: &str,
+) -> Result<ValhallaRouteRequest, PackError> {
+    let inspection = inspect_pack(pack)?;
+    require_clean_inspection(&inspection)?;
+    validate_route_endpoint(inspection.manifest.region.bbox, from_lon, from_lat, "from")?;
+    validate_route_endpoint(inspection.manifest.region.bbox, to_lon, to_lat, "to")?;
+
+    let costing = valhalla_costing(mode)?;
+    if !routing_mode_supported(&inspection.manifest.features.routing, mode, &costing) {
+        return Err(PackError::Invalid(format!(
+            "routing mode is not declared by pack: {mode}"
+        )));
+    }
+
+    resolve_asset_path(pack, "valhalla_tiles")?;
+    resolve_asset_path(pack, "valhalla_config")?;
+
+    Ok(ValhallaRouteRequest {
+        locations: vec![
+            RouteLocation {
+                lon: from_lon,
+                lat: from_lat,
+            },
+            RouteLocation {
+                lon: to_lon,
+                lat: to_lat,
+            },
+        ],
+        costing,
+    })
+}
+
+pub fn active_route_request(
+    store: &Path,
+    from_lon: f64,
+    from_lat: f64,
+    to_lon: f64,
+    to_lat: f64,
+    mode: &str,
+) -> Result<ValhallaRouteRequest, PackError> {
+    let pack = active_pack(store)?;
+    route_request(&pack.path, from_lon, from_lat, to_lon, to_lat, mode)
+}
+
 pub fn read_manifest(path: &Path) -> Result<Manifest, PackError> {
     let contents = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&contents)?)
@@ -1241,6 +1303,40 @@ fn bbox_contains(bbox: [f64; 4], lon: f64, lat: f64) -> bool {
 fn bbox_area(bbox: [f64; 4]) -> f64 {
     let [min_lon, min_lat, max_lon, max_lat] = bbox;
     (max_lon - min_lon) * (max_lat - min_lat)
+}
+
+fn validate_route_endpoint(
+    bbox: [f64; 4],
+    lon: f64,
+    lat: f64,
+    label: &str,
+) -> Result<(), PackError> {
+    validate_lon_lat(lon, lat)?;
+    if !bbox_contains(bbox, lon, lat) {
+        return Err(PackError::Invalid(format!(
+            "{label} route point is outside pack bbox"
+        )));
+    }
+
+    Ok(())
+}
+
+fn valhalla_costing(mode: &str) -> Result<String, PackError> {
+    match mode {
+        "pedestrian" | "walking" | "walk" => Ok("pedestrian".to_string()),
+        "bicycle" | "cycling" | "bike" => Ok("bicycle".to_string()),
+        "auto" | "car" | "driving" | "drive" => Ok("auto".to_string()),
+        other => Err(PackError::Invalid(format!(
+            "unsupported routing mode: {other}"
+        ))),
+    }
+}
+
+fn routing_mode_supported(modes: &[String], requested: &str, costing: &str) -> bool {
+    modes.iter().any(|mode| {
+        mode == requested
+            || matches!(valhalla_costing(mode).as_deref(), Ok(value) if value == costing)
+    })
 }
 
 fn declares_kind(manifest: &Manifest, kind: &str) -> bool {
@@ -2297,6 +2393,25 @@ mod tests {
                 .to_string_lossy()
                 .to_string()
         );
+
+        let route = route_request(&pack, 1.5, 2.5, 2.5, 3.5, "walking")
+            .expect("route request should build");
+        assert_eq!(route.costing, "pedestrian");
+        assert_eq!(
+            route.locations,
+            vec![
+                RouteLocation { lon: 1.5, lat: 2.5 },
+                RouteLocation { lon: 2.5, lat: 3.5 }
+            ]
+        );
+        assert!(route_request(&pack, 1.5, 2.5, 20.0, 20.0, "walking")
+            .unwrap_err()
+            .to_string()
+            .contains("to route point is outside pack bbox"));
+        assert!(route_request(&pack, 1.5, 2.5, 2.5, 3.5, "bicycle")
+            .unwrap_err()
+            .to_string()
+            .contains("routing mode is not declared"));
 
         fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(runtime_output.parent().unwrap()).ok();

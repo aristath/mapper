@@ -30,6 +30,9 @@ the local tile archive, so app code can launch routing from resolved local asset
 paths instead of guessing filenames.
 Before launching Valhalla, Mapper materializes a runtime config that rewrites
 `mjolnir.tile_extract` to the absolute installed tile archive path.
+Route requests are generated as Valhalla-shaped JSON only after the pack is
+validated, the requested routing mode is declared by the pack, and both
+endpoints are inside the pack bounding box.
 
 Mapper should provide:
 
