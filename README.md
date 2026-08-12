@@ -226,3 +226,10 @@ Emit runtime JSON for the selected installed pack:
 cargo run -p mapper-pack -- active-runtime-config \
   --store target/installed-packs
 ```
+
+Emit one app-facing JSON snapshot of the local pack store:
+
+```bash
+cargo run -p mapper-pack -- store-snapshot \
+  --store target/installed-packs
+```

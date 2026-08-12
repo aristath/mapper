@@ -27,6 +27,8 @@ pack is a local directory with a validated `manifest.json`.
 The app should resolve assets by declared `kind`, not by guessing filenames.
 The selected pack is store state, held in `active-pack.json`, not a file inside
 the pack itself.
+The app can read one store snapshot to get installed packs, the active pack, the
+active runtime config, and warnings about stale local state.
 When more than one installed pack covers the same lon/lat, the smallest bounding
 box is preferred so a city pack wins over a broader regional pack.
 

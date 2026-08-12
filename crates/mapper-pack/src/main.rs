@@ -2,10 +2,10 @@ use mapper_pack::{
     active_pack, active_runtime_config, add_default_style_to_pack, add_file_to_pack,
     add_pack_to_registry, bundle_pack, init_pack, inspect_pack, install_bundle,
     install_from_registry, install_pack, list_installed_packs, read_registry, required_toolchain,
-    resolve_asset_path, runtime_config, set_active_pack, set_active_pack_at, unpack_bundle,
-    update_from_registry, AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions,
-    InstallFromRegistryOptions, InstallOptions, RegistryAddOptions, UninstallOptions,
-    UnpackOptions,
+    resolve_asset_path, runtime_config, set_active_pack, set_active_pack_at, store_snapshot,
+    unpack_bundle, update_from_registry, AddFileOptions, BundleOptions, InitOptions,
+    InstallBundleOptions, InstallFromRegistryOptions, InstallOptions, RegistryAddOptions,
+    UninstallOptions, UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -177,6 +177,13 @@ fn main() {
                 println!("{}", serde_json::to_string_pretty(&config)?);
                 Ok(())
             }),
+        "store-snapshot" => {
+            parse_store_for_command(args.collect(), "store-snapshot").and_then(|store| {
+                let snapshot = store_snapshot(&store)?;
+                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+                Ok(())
+            })
+        }
         "covering" => {
             parse_store_lon_lat(args.collect(), "covering").and_then(|(store, lon, lat)| {
                 for pack in mapper_pack::covering_packs(&store, lon, lat)? {
@@ -807,6 +814,7 @@ fn print_help() {
     println!("  mapper-pack asset --pack <dir> --kind <kind>");
     println!("  mapper-pack runtime-config --pack <dir>");
     println!("  mapper-pack active-runtime-config --store <dir>");
+    println!("  mapper-pack store-snapshot --store <dir>");
     println!("  mapper-pack covering --store <dir> --lon <lon> --lat <lat>");
     println!("  mapper-pack toolchain");
 }

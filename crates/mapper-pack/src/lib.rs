@@ -67,7 +67,7 @@ pub struct FileProblem {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InstalledPack {
     pub id: String,
     pub name: String,
@@ -101,6 +101,14 @@ pub struct RuntimeAssets {
     pub search_index: Option<String>,
     pub poi_index: Option<String>,
     pub gtfs: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StoreSnapshot {
+    pub installed: Vec<InstalledPack>,
+    pub active: Option<InstalledPack>,
+    pub active_runtime: Option<RuntimeConfig>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -631,6 +639,33 @@ pub fn covering_packs(store: &Path, lon: f64, lat: f64) -> Result<Vec<InstalledP
     });
 
     Ok(packs)
+}
+
+pub fn store_snapshot(store: &Path) -> Result<StoreSnapshot, PackError> {
+    let installed = list_installed_packs(store)?;
+    let mut warnings = Vec::new();
+    let mut active = None;
+    let mut active_runtime = None;
+
+    if active_pack_path(store).exists() {
+        match active_pack(store) {
+            Ok(pack) => {
+                match runtime_config(&pack.path) {
+                    Ok(config) => active_runtime = Some(config),
+                    Err(error) => warnings.push(format!("active runtime config failed: {error}")),
+                }
+                active = Some(pack);
+            }
+            Err(error) => warnings.push(format!("active pack selection is invalid: {error}")),
+        }
+    }
+
+    Ok(StoreSnapshot {
+        installed,
+        active,
+        active_runtime,
+        warnings,
+    })
 }
 
 fn fetch_registry_archive(options: &InstallFromRegistryOptions) -> Result<PathBuf, PackError> {
@@ -1694,6 +1729,63 @@ mod tests {
         })
         .expect("active pack should uninstall");
         assert!(active_pack(&store).is_err());
+
+        fs::remove_dir_all(pack).ok();
+        fs::remove_dir_all(store).ok();
+        fs::remove_dir_all(source.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn store_snapshot_reports_installed_and_active_runtime_state() {
+        let pack = temp_pack_dir("snapshot-pack");
+        let source = temp_pack_dir("snapshot-source").join("tiles.pmtiles");
+        let store = temp_pack_dir("snapshot-store");
+
+        let empty = store_snapshot(&store).expect("empty store should snapshot");
+        assert!(empty.installed.is_empty());
+        assert_eq!(empty.active, None);
+        assert_eq!(empty.active_runtime, None);
+        assert!(empty.warnings.is_empty());
+
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"local tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        add_file_to_pack(AddFileOptions {
+            pack: pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("file should attach");
+        add_default_style_to_pack(&pack).expect("style should generate");
+
+        install_pack(InstallOptions {
+            pack: pack.clone(),
+            store: store.clone(),
+        })
+        .expect("pack should install");
+        set_active_pack(&store, "region-pack").expect("active pack should set");
+
+        let snapshot = store_snapshot(&store).expect("store should snapshot");
+        assert_eq!(snapshot.installed.len(), 1);
+        assert_eq!(snapshot.installed[0].country, "ZZ");
+        assert_eq!(snapshot.installed[0].bbox, [1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(snapshot.active.unwrap().id, "region-pack");
+        assert_eq!(snapshot.active_runtime.unwrap().id, "region-pack");
+        assert!(snapshot.warnings.is_empty());
 
         fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(store).ok();
