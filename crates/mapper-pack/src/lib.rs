@@ -55,7 +55,14 @@ pub struct PackFile {
 pub struct Inspection {
     pub manifest: Manifest,
     pub missing_files: Vec<PathBuf>,
+    pub invalid_files: Vec<FileProblem>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileProblem {
+    pub path: PathBuf,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -147,10 +154,28 @@ pub fn inspect_pack(path: &Path) -> Result<Inspection, PackError> {
     validate_manifest(&manifest)?;
 
     let mut missing_files = Vec::new();
+    let mut invalid_files = Vec::new();
     for file in &manifest.files {
         let file_path = path.join(&file.path);
         if !file_path.exists() {
             missing_files.push(file_path);
+            continue;
+        }
+
+        let metadata = fs::metadata(&file_path)?;
+        if metadata.len() != file.bytes {
+            invalid_files.push(FileProblem {
+                path: file_path.clone(),
+                message: format!("expected {} bytes, found {}", file.bytes, metadata.len()),
+            });
+        }
+
+        let actual_sha256 = sha256_file(&file_path)?;
+        if actual_sha256 != file.sha256 {
+            invalid_files.push(FileProblem {
+                path: file_path,
+                message: format!("expected sha256 {}, found {}", file.sha256, actual_sha256),
+            });
         }
     }
 
@@ -168,6 +193,7 @@ pub fn inspect_pack(path: &Path) -> Result<Inspection, PackError> {
     Ok(Inspection {
         manifest,
         missing_files,
+        invalid_files,
         warnings,
     })
 }
@@ -208,6 +234,12 @@ pub fn install_pack(options: InstallOptions) -> Result<InstalledPack, PackError>
         return Err(PackError::Invalid(format!(
             "pack has {} missing file(s)",
             inspection.missing_files.len()
+        )));
+    }
+    if !inspection.invalid_files.is_empty() {
+        return Err(PackError::Invalid(format!(
+            "pack has {} invalid file(s)",
+            inspection.invalid_files.len()
         )));
     }
 
@@ -538,6 +570,7 @@ mod tests {
 
         let inspection = inspect_pack(&dir).expect("pack should inspect");
         assert!(inspection.missing_files.is_empty());
+        assert!(inspection.invalid_files.is_empty());
         assert!(inspection.warnings.is_empty());
 
         fs::remove_dir_all(dir).ok();
@@ -613,6 +646,50 @@ mod tests {
         let error = validate_relative_pack_path(Path::new("../outside.pmtiles"))
             .expect_err("escaping path should fail");
         assert!(error.to_string().contains("parent"));
+    }
+
+    #[test]
+    fn inspect_reports_corrupt_pack_assets() {
+        let pack = temp_pack_dir("corrupt-pack");
+        let source = temp_pack_dir("corrupt-source").join("tiles.pmtiles");
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"original bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        add_file_to_pack(AddFileOptions {
+            pack: pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("file should attach");
+
+        fs::write(pack.join("map/tiles.pmtiles"), b"changed bytes").unwrap();
+
+        let inspection = inspect_pack(&pack).expect("pack should inspect");
+        assert!(!inspection.invalid_files.is_empty());
+
+        let install_error = install_pack(InstallOptions {
+            pack: pack.clone(),
+            store: temp_pack_dir("corrupt-store"),
+        })
+        .expect_err("corrupt pack should not install");
+        assert!(install_error.to_string().contains("invalid file"));
+
+        fs::remove_dir_all(pack).ok();
+        fs::remove_dir_all(source.parent().unwrap()).ok();
     }
 
     #[test]

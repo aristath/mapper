@@ -23,6 +23,10 @@ The app should treat an installed pack as a local directory with a validated
 `manifest.json`. It should resolve assets by declared `kind`, not by guessing
 filenames.
 
+Pack install must reject missing or corrupt assets. Every declared file is
+checked against its manifest `bytes` and `sha256` before it is copied into the
+local pack store.
+
 Current asset kinds:
 
 - `vector_tiles`

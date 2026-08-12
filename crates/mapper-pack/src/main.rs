@@ -124,6 +124,13 @@ fn inspect_command(path: &Path) -> Result<(), mapper_pack::PackError> {
         }
     }
 
+    if !inspection.invalid_files.is_empty() {
+        println!("invalid files:");
+        for problem in inspection.invalid_files {
+            println!("  {}: {}", problem.path.display(), problem.message);
+        }
+    }
+
     if !inspection.warnings.is_empty() {
         println!("warnings:");
         for warning in inspection.warnings {
