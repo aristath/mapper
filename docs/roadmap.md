@@ -15,6 +15,13 @@
 - Apply a first pixel-city style.
 - Confirm Linux desktop rendering first.
 
+Current first-city scripts:
+
+- `scripts/download-greece-extract.sh`
+- `scripts/clip-athens-extract.sh`
+- `scripts/build-athens-vector-tiles.sh`
+- `scripts/inspect-athens-vector-tiles.sh`
+
 ## Milestone 3: Offline Routing Spike
 
 - Generate Valhalla graph tiles for the same city.
@@ -36,4 +43,3 @@
 - Add checksums.
 - Add local search index.
 - Add update metadata.
-

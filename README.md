@@ -66,3 +66,21 @@ Download the Greece OpenStreetMap extract for the first Athens spike:
 ```bash
 scripts/download-greece-extract.sh
 ```
+
+Clip the Athens metro extract:
+
+```bash
+scripts/clip-athens-extract.sh
+```
+
+Build local vector tiles for Athens:
+
+```bash
+scripts/build-athens-vector-tiles.sh
+```
+
+Inspect the generated PMTiles archive:
+
+```bash
+scripts/inspect-athens-vector-tiles.sh
+```
