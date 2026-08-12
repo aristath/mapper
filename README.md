@@ -33,3 +33,24 @@ This repository is at the planning and technical-spike stage. The first
 implementation milestone is a single-city offline prototype that can render a
 local pixel-styled map and calculate a route without network access.
 
+## Pack Tooling
+
+Create an offline pack skeleton:
+
+```bash
+cargo run -p mapper-pack -- init \
+  --out target/athens-metro.mapperpack \
+  --id athens-metro \
+  --name "Athens Metro" \
+  --country GR \
+  --bbox 23.45,37.75,24.15,38.25 \
+  --version 2026.08.12 \
+  --generated-at 2026-08-12T00:00:00Z \
+  --osm-extract greece-latest.osm.pbf
+```
+
+Inspect a pack:
+
+```bash
+cargo run -p mapper-pack -- inspect target/athens-metro.mapperpack
+```
