@@ -1,4 +1,6 @@
-use mapper_pack::{init_pack, inspect_pack, required_toolchain, InitOptions};
+use mapper_pack::{
+    add_file_to_pack, init_pack, inspect_pack, required_toolchain, AddFileOptions, InitOptions,
+};
 use std::path::{Path, PathBuf};
 
 fn main() {
@@ -22,6 +24,11 @@ fn main() {
 
             inspect_command(Path::new(&path))
         }
+        "add-file" => parse_add_file(args.collect()).and_then(|options| {
+            let file = add_file_to_pack(options)?;
+            println!("added {} ({} bytes, {})", file.path, file.bytes, file.kind);
+            Ok(())
+        }),
         "toolchain" => {
             toolchain_command();
             Ok(())
@@ -147,6 +154,44 @@ fn parse_init(args: Vec<String>) -> Result<InitOptions, mapper_pack::PackError> 
     })
 }
 
+fn parse_add_file(args: Vec<String>) -> Result<AddFileOptions, mapper_pack::PackError> {
+    let mut pack = None;
+    let mut source = None;
+    let mut pack_path = None;
+    let mut kind = None;
+    let mut feature = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--pack" => pack = Some(PathBuf::from(value)),
+            "--source" => source = Some(PathBuf::from(value)),
+            "--pack-path" => pack_path = Some(PathBuf::from(value)),
+            "--kind" => kind = Some(value),
+            "--feature" => feature = Some(value),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown add-file option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok(AddFileOptions {
+        pack: required(pack, "--pack")?,
+        source: required(source, "--source")?,
+        pack_path: required(pack_path, "--pack-path")?,
+        kind: required(kind, "--kind")?,
+        feature,
+    })
+}
+
 fn parse_bbox(value: &str) -> Result<[f64; 4], mapper_pack::PackError> {
     let parts: Vec<&str> = value.split(',').collect();
     if parts.len() != 4 {
@@ -174,5 +219,6 @@ fn print_help() {
     println!("Usage:");
     println!("  mapper-pack init --out <dir> --id <id> --name <name> --country <code> --bbox <min_lon,min_lat,max_lon,max_lat> --version <version> --generated-at <iso-date> --osm-extract <file>");
     println!("  mapper-pack inspect <pack-path>");
+    println!("  mapper-pack add-file --pack <dir> --source <file> --pack-path <relative-path> --kind <kind> [--feature <feature>]");
     println!("  mapper-pack toolchain");
 }

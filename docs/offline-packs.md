@@ -4,10 +4,10 @@ An offline pack is the unit the user downloads.
 
 Examples:
 
-- `athens-core`
-- `athens-metro`
+- `monaco`
+- `berlin`
 - `attica`
-- `berlin-core`
+- `greece`
 
 ## Pack Goals
 
@@ -20,7 +20,7 @@ Examples:
 ## Draft Layout
 
 ```text
-athens-metro.mapperpack/
+region.mapperpack/
   manifest.json
   attribution.txt
   map/
@@ -45,17 +45,17 @@ athens-metro.mapperpack/
 ```json
 {
   "schema": 1,
-  "id": "athens-metro",
-  "name": "Athens Metro",
+  "id": "region",
+  "name": "Region",
   "region": {
-    "country": "GR",
-    "bbox": [23.45, 37.75, 24.15, 38.25]
+    "country": "ZZ",
+    "bbox": [1.0, 2.0, 3.0, 4.0]
   },
   "version": "2026.08.12",
   "generated_at": "2026-08-12T00:00:00Z",
   "sources": {
     "osm": {
-      "extract": "greece-latest.osm.pbf",
+      "extract": "region.osm.pbf",
       "license": "ODbL-1.0"
     }
   },
@@ -84,4 +84,3 @@ athens-metro.mapperpack/
 - Whether Valhalla tiles should remain as a tar bundle or be packed into the
   same city-pack container.
 - How much building geometry to include at each pack size.
-

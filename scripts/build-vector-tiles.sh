@@ -1,31 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ $# -ne 2 ]]; then
+  printf 'usage: %s <input.osm.pbf> <output.pmtiles>\n' "$0" >&2
+  exit 2
+fi
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-input="$root/data/work/athens-metro.osm.pbf"
-output_dir="$root/data/work"
-output="$output_dir/athens-metro.pmtiles"
+input="$(realpath "$1")"
+output="$(realpath -m "$2")"
+output_dir="$(dirname "$output")"
 
 mkdir -p "$output_dir"
 
 if [[ ! -f "$input" ]]; then
   printf 'missing %s\n' "$input" >&2
-  printf 'run scripts/clip-athens-extract.sh first\n' >&2
   exit 1
 fi
+
+container_input="/data/input/$(basename "$input")"
+container_output="/data/output/$(basename "$output")"
 
 if command -v tilemaker >/dev/null 2>&1; then
   tilemaker "$input" --output "$output"
 elif command -v docker >/dev/null 2>&1; then
   docker run --rm --pull missing \
-    -v "$root/data:/data" \
+    -v "$(dirname "$input"):/data/input:ro" \
+    -v "$output_dir:/data/output" \
     ghcr.io/systemed/tilemaker:master \
-    /data/work/athens-metro.osm.pbf --output /data/work/athens-metro.pmtiles
+    "$container_input" --output "$container_output"
 elif command -v podman >/dev/null 2>&1; then
   podman run --rm --pull missing \
-    -v "$root/data:/data:Z" \
+    -v "$(dirname "$input"):/data/input:ro,Z" \
+    -v "$output_dir:/data/output:Z" \
     ghcr.io/systemed/tilemaker:master \
-    /data/work/athens-metro.osm.pbf --output /data/work/athens-metro.pmtiles
+    "$container_input" --output "$container_output"
 else
   printf 'missing tilemaker and no docker/podman fallback found\n' >&2
   exit 1

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fmt;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Manifest {
@@ -162,6 +164,36 @@ pub fn inspect_pack(path: &Path) -> Result<Inspection, PackError> {
     })
 }
 
+pub fn add_file_to_pack(options: AddFileOptions) -> Result<PackFile, PackError> {
+    validate_relative_pack_path(&options.pack_path)?;
+
+    let manifest_path = options.pack.join("manifest.json");
+    let mut manifest = read_manifest(&manifest_path)?;
+    validate_manifest(&manifest)?;
+
+    let target_path = options.pack.join(&options.pack_path);
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(&options.source, &target_path)?;
+
+    let metadata = fs::metadata(&target_path)?;
+    let pack_file = PackFile {
+        path: options.pack_path.to_string_lossy().replace('\\', "/"),
+        kind: options.kind,
+        bytes: metadata.len(),
+        sha256: sha256_file(&target_path)?,
+    };
+
+    manifest.files.retain(|file| file.path != pack_file.path);
+    manifest.files.push(pack_file.clone());
+    apply_feature(&mut manifest, &options.feature)?;
+
+    write_json(&manifest_path, &manifest)?;
+
+    Ok(pack_file)
+}
+
 pub fn read_manifest(path: &Path) -> Result<Manifest, PackError> {
     let contents = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&contents)?)
@@ -239,6 +271,15 @@ pub struct InitOptions {
     pub osm_extract: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct AddFileOptions {
+    pub pack: PathBuf,
+    pub source: PathBuf,
+    pub pack_path: PathBuf,
+    pub kind: String,
+    pub feature: Option<String>,
+}
+
 fn validate_pack_id(id: &str) -> Result<(), PackError> {
     let valid = !id.is_empty()
         && id
@@ -252,6 +293,27 @@ fn validate_pack_id(id: &str) -> Result<(), PackError> {
             "pack id must contain only lowercase letters, numbers, and hyphens".to_string(),
         ))
     }
+}
+
+fn validate_relative_pack_path(path: &Path) -> Result<(), PackError> {
+    if path.as_os_str().is_empty() || path.is_absolute() {
+        return Err(PackError::Invalid(
+            "pack path must be a relative path inside the pack".to_string(),
+        ));
+    }
+
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => {}
+            _ => {
+                return Err(PackError::Invalid(
+                    "pack path cannot contain prefixes, root, or parent segments".to_string(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_bbox(bbox: [f64; 4]) -> Result<(), PackError> {
@@ -282,6 +344,50 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), PackError> {
     Ok(())
 }
 
+fn sha256_file(path: &Path) -> Result<String, PackError> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 64];
+
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn apply_feature(manifest: &mut Manifest, feature: &Option<String>) -> Result<(), PackError> {
+    let Some(feature) = feature else {
+        return Ok(());
+    };
+
+    match feature.as_str() {
+        "rendering" => manifest.features.rendering = true,
+        "search" => manifest.features.search = true,
+        "transit" => manifest.features.transit = true,
+        feature if feature.starts_with("routing:") => {
+            let mode = feature.trim_start_matches("routing:").to_string();
+            if mode.is_empty() {
+                return Err(PackError::Invalid(
+                    "routing feature needs a mode".to_string(),
+                ));
+            }
+            if !manifest.features.routing.contains(&mode) {
+                manifest.features.routing.push(mode);
+            }
+        }
+        other => {
+            return Err(PackError::Invalid(format!("unknown feature flag: {other}")));
+        }
+    }
+
+    Ok(())
+}
+
 fn find_executable(name: &str) -> Option<PathBuf> {
     let paths = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&paths) {
@@ -303,17 +409,17 @@ mod tests {
         let dir = temp_pack_dir("init");
         let manifest = init_pack(InitOptions {
             output: dir.clone(),
-            id: "athens-metro".to_string(),
-            name: "Athens Metro".to_string(),
-            country: "GR".to_string(),
-            bbox: [23.45, 37.75, 24.15, 38.25],
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
             version: "2026.08.12".to_string(),
             generated_at: "2026-08-12T00:00:00Z".to_string(),
-            osm_extract: "greece-latest.osm.pbf".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
         })
         .expect("pack should initialize");
 
-        assert_eq!(manifest.id, "athens-metro");
+        assert_eq!(manifest.id, "region-pack");
         assert!(dir.join("manifest.json").exists());
         assert!(dir.join("attribution.txt").exists());
         assert!(dir.join("map").is_dir());
@@ -349,20 +455,68 @@ mod tests {
         );
     }
 
+    #[test]
+    fn add_file_copies_asset_and_updates_manifest() {
+        let dir = temp_pack_dir("add-file");
+        let source = temp_pack_dir("source").join("tiles.pmtiles");
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"local tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: dir.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        let file = add_file_to_pack(AddFileOptions {
+            pack: dir.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("file should attach");
+
+        assert_eq!(file.bytes, 16);
+        assert_eq!(file.kind, "vector_tiles");
+        assert!(dir.join("map/tiles.pmtiles").exists());
+
+        let manifest = read_manifest(&dir.join("manifest.json")).unwrap();
+        assert!(manifest.features.rendering);
+        assert_eq!(manifest.files.len(), 1);
+        assert_eq!(manifest.files[0].path, "map/tiles.pmtiles");
+
+        fs::remove_dir_all(dir).ok();
+        fs::remove_dir_all(source.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn rejects_pack_paths_that_escape_the_pack() {
+        let error = validate_relative_pack_path(Path::new("../outside.pmtiles"))
+            .expect_err("escaping path should fail");
+        assert!(error.to_string().contains("parent"));
+    }
+
     fn sample_manifest() -> Manifest {
         Manifest {
             schema: 1,
-            id: "athens-metro".to_string(),
-            name: "Athens Metro".to_string(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
             region: Region {
-                country: "GR".to_string(),
-                bbox: [23.45, 37.75, 24.15, 38.25],
+                country: "ZZ".to_string(),
+                bbox: [1.0, 2.0, 3.0, 4.0],
             },
             version: "2026.08.12".to_string(),
             generated_at: "2026-08-12T00:00:00Z".to_string(),
             sources: Sources {
                 osm: OsmSource {
-                    extract: "greece-latest.osm.pbf".to_string(),
+                    extract: "region.osm.pbf".to_string(),
                     license: "ODbL-1.0".to_string(),
                 },
             },

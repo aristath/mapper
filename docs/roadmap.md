@@ -15,12 +15,11 @@
 - Apply a first pixel-city style.
 - Confirm Linux desktop rendering first.
 
-Current first-city scripts:
+Current local-map scripts:
 
-- `scripts/download-greece-extract.sh`
-- `scripts/clip-athens-extract.sh`
-- `scripts/build-athens-vector-tiles.sh`
-- `scripts/inspect-athens-vector-tiles.sh`
+- `scripts/download-osm-extract.sh`
+- `scripts/build-vector-tiles.sh`
+- `scripts/inspect-vector-tiles.sh`
 
 ## Milestone 3: Offline Routing Spike
 
