@@ -16,12 +16,15 @@ Examples:
 - Support incremental updates later.
 - Keep enough metadata to explain freshness and attribution.
 - Keep rendering, routing, and search versions in sync.
+- Move across the network as one downloadable archive.
 
 ## App Runtime Contract
 
-The app should treat an installed pack as a local directory with a validated
-`manifest.json`. It should resolve assets by declared `kind`, not by guessing
-filenames.
+The app downloads a `.mapperpack.tar` bundle, unpacks it into a temporary local
+directory, validates it, then installs it into the local pack store. An installed
+pack is a local directory with a validated `manifest.json`.
+
+The app should resolve assets by declared `kind`, not by guessing filenames.
 
 Pack install must reject missing or corrupt assets. Every declared file is
 checked against its manifest `bytes` and `sha256` before it is copied into the

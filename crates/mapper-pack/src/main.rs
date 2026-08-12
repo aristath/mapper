@@ -1,6 +1,7 @@
 use mapper_pack::{
-    add_file_to_pack, init_pack, inspect_pack, install_pack, list_installed_packs,
-    required_toolchain, resolve_asset_path, AddFileOptions, InitOptions, InstallOptions,
+    add_file_to_pack, bundle_pack, init_pack, inspect_pack, install_bundle, install_pack,
+    list_installed_packs, required_toolchain, resolve_asset_path, unpack_bundle, AddFileOptions,
+    BundleOptions, InitOptions, InstallBundleOptions, InstallOptions, UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -32,6 +33,26 @@ fn main() {
         }),
         "install" => parse_install(args.collect()).and_then(|options| {
             let installed = install_pack(options)?;
+            println!(
+                "installed {} {} at {}",
+                installed.id,
+                installed.version,
+                installed.path.display()
+            );
+            Ok(())
+        }),
+        "bundle" => parse_bundle(args.collect()).and_then(|options| {
+            let output = bundle_pack(options)?;
+            println!("bundled {}", output.display());
+            Ok(())
+        }),
+        "unpack" => parse_unpack(args.collect()).and_then(|options| {
+            let output = unpack_bundle(options)?;
+            println!("unpacked {}", output.display());
+            Ok(())
+        }),
+        "install-bundle" => parse_install_bundle(args.collect()).and_then(|options| {
+            let installed = install_bundle(options)?;
             println!(
                 "installed {} {} at {}",
                 installed.id,
@@ -255,6 +276,93 @@ fn parse_install(args: Vec<String>) -> Result<InstallOptions, mapper_pack::PackE
     })
 }
 
+fn parse_bundle(args: Vec<String>) -> Result<BundleOptions, mapper_pack::PackError> {
+    let mut pack = None;
+    let mut output = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--pack" => pack = Some(PathBuf::from(value)),
+            "--out" => output = Some(PathBuf::from(value)),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown bundle option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok(BundleOptions {
+        pack: required(pack, "--pack")?,
+        output: required(output, "--out")?,
+    })
+}
+
+fn parse_unpack(args: Vec<String>) -> Result<UnpackOptions, mapper_pack::PackError> {
+    let mut archive = None;
+    let mut output = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--archive" => archive = Some(PathBuf::from(value)),
+            "--out" => output = Some(PathBuf::from(value)),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown unpack option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok(UnpackOptions {
+        archive: required(archive, "--archive")?,
+        output: required(output, "--out")?,
+    })
+}
+
+fn parse_install_bundle(args: Vec<String>) -> Result<InstallBundleOptions, mapper_pack::PackError> {
+    let mut archive = None;
+    let mut store = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--archive" => archive = Some(PathBuf::from(value)),
+            "--store" => store = Some(PathBuf::from(value)),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown install-bundle option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok(InstallBundleOptions {
+        archive: required(archive, "--archive")?,
+        store: required(store, "--store")?,
+    })
+}
+
 fn parse_store(args: Vec<String>) -> Result<PathBuf, mapper_pack::PackError> {
     let mut store = None;
 
@@ -334,6 +442,9 @@ fn print_help() {
     println!("  mapper-pack inspect <pack-path>");
     println!("  mapper-pack add-file --pack <dir> --source <file> --pack-path <relative-path> --kind <kind> [--feature <feature>]");
     println!("  mapper-pack install --pack <dir> --store <dir>");
+    println!("  mapper-pack bundle --pack <dir> --out <file.mapperpack.tar>");
+    println!("  mapper-pack unpack --archive <file.mapperpack.tar> --out <dir>");
+    println!("  mapper-pack install-bundle --archive <file.mapperpack.tar> --store <dir>");
     println!("  mapper-pack list --store <dir>");
     println!("  mapper-pack asset --pack <dir> --kind <kind>");
     println!("  mapper-pack toolchain");

@@ -4,6 +4,7 @@ use std::fmt;
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Manifest {
@@ -262,6 +263,81 @@ pub fn install_pack(options: InstallOptions) -> Result<InstalledPack, PackError>
     })
 }
 
+pub fn bundle_pack(options: BundleOptions) -> Result<PathBuf, PackError> {
+    require_clean_inspection(&inspect_pack(&options.pack)?)?;
+
+    if let Some(parent) = options.output.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let file = fs::File::create(&options.output)?;
+    let mut builder = tar::Builder::new(file);
+    append_pack_dir(&mut builder, &options.pack, &options.pack)?;
+    builder.finish()?;
+
+    Ok(options.output)
+}
+
+pub fn unpack_bundle(options: UnpackOptions) -> Result<PathBuf, PackError> {
+    fs::create_dir_all(&options.output)?;
+
+    let file = fs::File::open(&options.archive)?;
+    let mut archive = tar::Archive::new(file);
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let entry_path = entry.path()?.into_owned();
+        if entry_path.as_os_str().is_empty() {
+            continue;
+        }
+
+        validate_relative_pack_path(&entry_path)?;
+
+        let target = options.output.join(&entry_path);
+        let entry_type = entry.header().entry_type();
+        if entry_type.is_dir() {
+            fs::create_dir_all(&target)?;
+        } else if entry_type.is_file() {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            entry.unpack(&target)?;
+        } else {
+            return Err(PackError::Invalid(format!(
+                "unsupported archive entry: {}",
+                entry_path.display()
+            )));
+        }
+    }
+
+    require_clean_inspection(&inspect_pack(&options.output)?)?;
+    Ok(options.output)
+}
+
+pub fn install_bundle(options: InstallBundleOptions) -> Result<InstalledPack, PackError> {
+    fs::create_dir_all(&options.store)?;
+    let temp = options.store.join(format!(".incoming-{}", unique_suffix()));
+
+    match unpack_bundle(UnpackOptions {
+        archive: options.archive,
+        output: temp.clone(),
+    })
+    .and_then(|_| {
+        install_pack(InstallOptions {
+            pack: temp.clone(),
+            store: options.store,
+        })
+    }) {
+        Ok(installed) => {
+            fs::remove_dir_all(&temp).ok();
+            Ok(installed)
+        }
+        Err(error) => {
+            fs::remove_dir_all(&temp).ok();
+            Err(error)
+        }
+    }
+}
+
 pub fn list_installed_packs(store: &Path) -> Result<Vec<InstalledPack>, PackError> {
     if !store.exists() {
         return Ok(Vec::new());
@@ -405,6 +481,24 @@ pub struct InstallOptions {
     pub store: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BundleOptions {
+    pub pack: PathBuf,
+    pub output: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnpackOptions {
+    pub archive: PathBuf,
+    pub output: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstallBundleOptions {
+    pub archive: PathBuf,
+    pub store: PathBuf,
+}
+
 fn validate_pack_id(id: &str) -> Result<(), PackError> {
     let valid = !id.is_empty()
         && id
@@ -466,6 +560,46 @@ fn declares_kind(manifest: &Manifest, kind: &str) -> bool {
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), PackError> {
     let json = serde_json::to_string_pretty(value)?;
     fs::write(path, format!("{json}\n"))?;
+    Ok(())
+}
+
+fn require_clean_inspection(inspection: &Inspection) -> Result<(), PackError> {
+    if !inspection.missing_files.is_empty() {
+        return Err(PackError::Invalid(format!(
+            "pack has {} missing file(s)",
+            inspection.missing_files.len()
+        )));
+    }
+    if !inspection.invalid_files.is_empty() {
+        return Err(PackError::Invalid(format!(
+            "pack has {} invalid file(s)",
+            inspection.invalid_files.len()
+        )));
+    }
+    Ok(())
+}
+
+fn append_pack_dir(
+    builder: &mut tar::Builder<fs::File>,
+    root: &Path,
+    current: &Path,
+) -> Result<(), PackError> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        let relative_path = path
+            .strip_prefix(root)
+            .map_err(|error| PackError::Invalid(error.to_string()))?;
+        validate_relative_pack_path(relative_path)?;
+
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            builder.append_dir(relative_path, &path)?;
+            append_pack_dir(builder, root, &path)?;
+        } else if file_type.is_file() {
+            builder.append_path_with_name(&path, relative_path)?;
+        }
+    }
     Ok(())
 }
 
@@ -541,6 +675,13 @@ fn find_executable(name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn unique_suffix() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -741,6 +882,66 @@ mod tests {
         fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(store).ok();
         fs::remove_dir_all(source.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn bundles_unpacks_and_installs_pack_archive() {
+        let pack = temp_pack_dir("bundle-pack");
+        let source = temp_pack_dir("bundle-source").join("tiles.pmtiles");
+        let archive = temp_pack_dir("bundle-archive").join("region.mapperpack.tar");
+        let unpacked = temp_pack_dir("unpacked-pack");
+        let store = temp_pack_dir("bundle-store");
+
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"local tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        add_file_to_pack(AddFileOptions {
+            pack: pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("file should attach");
+
+        let archive = bundle_pack(BundleOptions {
+            pack,
+            output: archive,
+        })
+        .expect("pack should bundle");
+        assert!(archive.exists());
+
+        unpack_bundle(UnpackOptions {
+            archive: archive.clone(),
+            output: unpacked.clone(),
+        })
+        .expect("bundle should unpack");
+        assert!(unpacked.join("manifest.json").exists());
+
+        let installed = install_bundle(InstallBundleOptions {
+            archive: archive.clone(),
+            store: store.clone(),
+        })
+        .expect("bundle should install");
+        assert_eq!(installed.id, "region-pack");
+        assert!(resolve_asset_path(&installed.path, "vector_tiles").is_ok());
+
+        fs::remove_dir_all(source.parent().unwrap()).ok();
+        fs::remove_dir_all(archive.parent().unwrap()).ok();
+        fs::remove_dir_all(unpacked).ok();
+        fs::remove_dir_all(store).ok();
     }
 
     fn sample_manifest() -> Manifest {

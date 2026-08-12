@@ -98,6 +98,22 @@ cargo run -p mapper-pack -- install \
   --store target/installed-packs
 ```
 
+Bundle a pack into a downloadable file:
+
+```bash
+cargo run -p mapper-pack -- bundle \
+  --pack target/region.mapperpack \
+  --out target/region.mapperpack.tar
+```
+
+Install a downloaded bundle:
+
+```bash
+cargo run -p mapper-pack -- install-bundle \
+  --archive target/region.mapperpack.tar \
+  --store target/installed-packs
+```
+
 List installed packs:
 
 ```bash
