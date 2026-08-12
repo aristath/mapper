@@ -2,9 +2,10 @@ use mapper_pack::{
     active_pack, active_runtime_config, add_default_style_to_pack, add_file_to_pack,
     add_pack_to_registry, bundle_pack, init_pack, inspect_pack, install_bundle,
     install_from_registry, install_pack, list_installed_packs, read_registry, required_toolchain,
-    resolve_asset_path, runtime_config, set_active_pack, unpack_bundle, update_from_registry,
-    AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions, InstallFromRegistryOptions,
-    InstallOptions, RegistryAddOptions, UninstallOptions, UnpackOptions,
+    resolve_asset_path, runtime_config, set_active_pack, set_active_pack_at, unpack_bundle,
+    update_from_registry, AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions,
+    InstallFromRegistryOptions, InstallOptions, RegistryAddOptions, UninstallOptions,
+    UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -149,6 +150,18 @@ fn main() {
             );
             Ok(())
         }),
+        "active-set-at" => {
+            parse_store_lon_lat(args.collect(), "active-set-at").and_then(|(store, lon, lat)| {
+                let pack = set_active_pack_at(&store, lon, lat)?;
+                println!(
+                    "active {} {} at {}",
+                    pack.id,
+                    pack.version,
+                    pack.path.display()
+                );
+                Ok(())
+            })
+        }
         "asset" => parse_asset(args.collect()).and_then(|(pack, kind)| {
             println!("{}", resolve_asset_path(&pack, &kind)?.display());
             Ok(())
@@ -164,6 +177,21 @@ fn main() {
                 println!("{}", serde_json::to_string_pretty(&config)?);
                 Ok(())
             }),
+        "covering" => {
+            parse_store_lon_lat(args.collect(), "covering").and_then(|(store, lon, lat)| {
+                for pack in mapper_pack::covering_packs(&store, lon, lat)? {
+                    println!(
+                        "{}\t{}\t{}\t{}\t{:?}",
+                        pack.id,
+                        pack.version,
+                        pack.name,
+                        pack.path.display(),
+                        pack.bbox
+                    );
+                }
+                Ok(())
+            })
+        }
         "toolchain" => {
             toolchain_command();
             Ok(())
@@ -602,6 +630,41 @@ fn parse_active_set(args: Vec<String>) -> Result<(PathBuf, String), mapper_pack:
     Ok((required(store, "--store")?, required(id, "--id")?))
 }
 
+fn parse_store_lon_lat(
+    args: Vec<String>,
+    command: &str,
+) -> Result<(PathBuf, f64, f64), mapper_pack::PackError> {
+    let mut store = None;
+    let mut lon = None;
+    let mut lat = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--store" => store = Some(PathBuf::from(value)),
+            "--lon" => lon = Some(parse_coordinate(&value, "--lon", -180.0, 180.0)?),
+            "--lat" => lat = Some(parse_coordinate(&value, "--lat", -90.0, 90.0)?),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown {command} option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok((
+        required(store, "--store")?,
+        required(lon, "--lon")?,
+        required(lat, "--lat")?,
+    ))
+}
+
 fn parse_uninstall(args: Vec<String>) -> Result<UninstallOptions, mapper_pack::PackError> {
     let mut store = None;
     let mut id = None;
@@ -698,6 +761,24 @@ fn parse_bbox(value: &str) -> Result<[f64; 4], mapper_pack::PackError> {
     Ok(bbox)
 }
 
+fn parse_coordinate(
+    value: &str,
+    name: &str,
+    min: f64,
+    max: f64,
+) -> Result<f64, mapper_pack::PackError> {
+    let coordinate = value
+        .parse::<f64>()
+        .map_err(|_| mapper_pack::PackError::Invalid(format!("invalid {name}: {value}")))?;
+    if !coordinate.is_finite() || coordinate < min || coordinate > max {
+        return Err(mapper_pack::PackError::Invalid(format!(
+            "{name} is outside valid range"
+        )));
+    }
+
+    Ok(coordinate)
+}
+
 fn required<T>(value: Option<T>, name: &str) -> Result<T, mapper_pack::PackError> {
     value.ok_or_else(|| mapper_pack::PackError::Invalid(format!("missing {name}")))
 }
@@ -721,9 +802,11 @@ fn print_help() {
     println!("  mapper-pack list --store <dir>");
     println!("  mapper-pack uninstall --store <dir> --id <id>");
     println!("  mapper-pack active-set --store <dir> --id <id>");
+    println!("  mapper-pack active-set-at --store <dir> --lon <lon> --lat <lat>");
     println!("  mapper-pack active-get --store <dir>");
     println!("  mapper-pack asset --pack <dir> --kind <kind>");
     println!("  mapper-pack runtime-config --pack <dir>");
     println!("  mapper-pack active-runtime-config --store <dir>");
+    println!("  mapper-pack covering --store <dir> --lon <lon> --lat <lat>");
     println!("  mapper-pack toolchain");
 }

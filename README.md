@@ -179,6 +179,24 @@ Show the selected pack:
 cargo run -p mapper-pack -- active-get --store target/installed-packs
 ```
 
+Find installed packs that cover a position:
+
+```bash
+cargo run -p mapper-pack -- covering \
+  --store target/installed-packs \
+  --lon 2.0 \
+  --lat 3.0
+```
+
+Select the smallest installed pack covering a position:
+
+```bash
+cargo run -p mapper-pack -- active-set-at \
+  --store target/installed-packs \
+  --lon 2.0 \
+  --lat 3.0
+```
+
 Remove an installed pack:
 
 ```bash

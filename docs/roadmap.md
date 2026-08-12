@@ -4,9 +4,9 @@
 
 - Create repository structure.
 - Define offline pack shape.
-- Add pack inspection CLI placeholder.
-- Choose first target city.
-- Build one tiny local map tile experiment.
+- Add pack inspection, install, update, and selection CLI.
+- Support generic downloadable region packs.
+- Build one tiny local map tile experiment from any OSM extract.
 
 ## Milestone 2: Offline Map Spike
 
@@ -32,7 +32,7 @@ Current local-map scripts:
 
 - Add Flutter app.
 - Integrate MapLibre Native.
-- Add pack list, pack install status, and map screen.
+- Add pack list, pack install status, active-pack selection, and map screen.
 - Bridge route requests to the local routing layer.
 
 ## Milestone 5: City Pack Builder
@@ -42,3 +42,4 @@ Current local-map scripts:
 - Add checksums.
 - Add local search index.
 - Add update metadata.
+- Add coordinate coverage lookup for installed packs.

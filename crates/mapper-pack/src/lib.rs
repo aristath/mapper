@@ -72,6 +72,8 @@ pub struct InstalledPack {
     pub id: String,
     pub name: String,
     pub version: String,
+    pub country: String,
+    pub bbox: [f64; 4],
     pub path: PathBuf,
 }
 
@@ -346,6 +348,8 @@ pub fn install_pack(options: InstallOptions) -> Result<InstalledPack, PackError>
         id: inspection.manifest.id,
         name: inspection.manifest.name,
         version: inspection.manifest.version,
+        country: inspection.manifest.region.country,
+        bbox: inspection.manifest.region.bbox,
         path: target,
     })
 }
@@ -529,6 +533,8 @@ pub fn list_installed_packs(store: &Path) -> Result<Vec<InstalledPack>, PackErro
             id: manifest.id,
             name: manifest.name,
             version: manifest.version,
+            country: manifest.region.country,
+            bbox: manifest.region.bbox,
             path,
         });
     }
@@ -589,6 +595,17 @@ pub fn set_active_pack(store: &Path, id: &str) -> Result<InstalledPack, PackErro
     Ok(pack)
 }
 
+pub fn set_active_pack_at(store: &Path, lon: f64, lat: f64) -> Result<InstalledPack, PackError> {
+    let pack = covering_packs(store, lon, lat)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            PackError::Invalid(format!("no installed pack covers lon/lat: {lon},{lat}"))
+        })?;
+
+    set_active_pack(store, &pack.id)
+}
+
 pub fn active_pack(store: &Path) -> Result<InstalledPack, PackError> {
     let selection = read_active_selection(store)?;
     installed_pack(store, &selection.id)
@@ -597,6 +614,23 @@ pub fn active_pack(store: &Path) -> Result<InstalledPack, PackError> {
 pub fn active_runtime_config(store: &Path) -> Result<RuntimeConfig, PackError> {
     let pack = active_pack(store)?;
     runtime_config(&pack.path)
+}
+
+pub fn covering_packs(store: &Path, lon: f64, lat: f64) -> Result<Vec<InstalledPack>, PackError> {
+    validate_lon_lat(lon, lat)?;
+
+    let mut packs: Vec<InstalledPack> = list_installed_packs(store)?
+        .into_iter()
+        .filter(|pack| bbox_contains(pack.bbox, lon, lat))
+        .collect();
+
+    packs.sort_by(|left, right| {
+        bbox_area(left.bbox)
+            .total_cmp(&bbox_area(right.bbox))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    Ok(packs)
 }
 
 fn fetch_registry_archive(options: &InstallFromRegistryOptions) -> Result<PathBuf, PackError> {
@@ -669,6 +703,8 @@ fn replace_installed_pack(
         id: inspection.manifest.id,
         name: inspection.manifest.name,
         version: inspection.manifest.version,
+        country: inspection.manifest.region.country,
+        bbox: inspection.manifest.region.bbox,
         path: target,
     })
 }
@@ -700,6 +736,8 @@ fn installed_pack(store: &Path, id: &str) -> Result<InstalledPack, PackError> {
         id: manifest.id,
         name: manifest.name,
         version: manifest.version,
+        country: manifest.region.country,
+        bbox: manifest.region.bbox,
         path,
     })
 }
@@ -1013,6 +1051,31 @@ fn validate_bbox(bbox: [f64; 4]) -> Result<(), PackError> {
         ));
     }
     Ok(())
+}
+
+fn validate_lon_lat(lon: f64, lat: f64) -> Result<(), PackError> {
+    if !lon.is_finite() || !lat.is_finite() {
+        return Err(PackError::Invalid(
+            "lon/lat values must be finite".to_string(),
+        ));
+    }
+    if !(-180.0..=180.0).contains(&lon) || !(-90.0..=90.0).contains(&lat) {
+        return Err(PackError::Invalid(
+            "lon/lat is outside valid range".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn bbox_contains(bbox: [f64; 4], lon: f64, lat: f64) -> bool {
+    let [min_lon, min_lat, max_lon, max_lat] = bbox;
+    (min_lon..=max_lon).contains(&lon) && (min_lat..=max_lat).contains(&lat)
+}
+
+fn bbox_area(bbox: [f64; 4]) -> f64 {
+    let [min_lon, min_lat, max_lon, max_lat] = bbox;
+    (max_lon - min_lon) * (max_lat - min_lat)
 }
 
 fn declares_kind(manifest: &Manifest, kind: &str) -> bool {
@@ -1635,6 +1698,64 @@ mod tests {
         fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(store).ok();
         fs::remove_dir_all(source.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn covering_packs_selects_smallest_region_for_position() {
+        let small_pack = temp_pack_dir("covering-small-pack");
+        let large_pack = temp_pack_dir("covering-large-pack");
+        let store = temp_pack_dir("covering-store");
+
+        init_pack(InitOptions {
+            output: large_pack.clone(),
+            id: "large-region".to_string(),
+            name: "Large Region".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [0.0, 0.0, 10.0, 10.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "large-region.osm.pbf".to_string(),
+        })
+        .expect("large pack should initialize");
+        init_pack(InitOptions {
+            output: small_pack.clone(),
+            id: "small-region".to_string(),
+            name: "Small Region".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 1.0, 3.0, 3.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "small-region.osm.pbf".to_string(),
+        })
+        .expect("small pack should initialize");
+
+        install_pack(InstallOptions {
+            pack: large_pack.clone(),
+            store: store.clone(),
+        })
+        .expect("large pack should install");
+        install_pack(InstallOptions {
+            pack: small_pack.clone(),
+            store: store.clone(),
+        })
+        .expect("small pack should install");
+
+        let matches = covering_packs(&store, 2.0, 2.0).expect("coverage should resolve");
+        assert_eq!(
+            matches
+                .iter()
+                .map(|pack| pack.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["small-region", "large-region"]
+        );
+
+        let active = set_active_pack_at(&store, 2.0, 2.0).expect("position should set active");
+        assert_eq!(active.id, "small-region");
+        assert!(covering_packs(&store, 20.0, 20.0).unwrap().is_empty());
+
+        fs::remove_dir_all(small_pack).ok();
+        fs::remove_dir_all(large_pack).ok();
+        fs::remove_dir_all(store).ok();
     }
 
     #[test]

@@ -27,6 +27,8 @@ pack is a local directory with a validated `manifest.json`.
 The app should resolve assets by declared `kind`, not by guessing filenames.
 The selected pack is store state, held in `active-pack.json`, not a file inside
 the pack itself.
+When more than one installed pack covers the same lon/lat, the smallest bounding
+box is preferred so a city pack wins over a broader regional pack.
 
 Pack install must reject missing or corrupt assets. Every declared file is
 checked against its manifest `bytes` and `sha256` before it is copied into the
