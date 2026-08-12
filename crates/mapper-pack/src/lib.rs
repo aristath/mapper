@@ -74,6 +74,26 @@ pub struct InstalledPack {
     pub path: PathBuf,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeConfig {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub bbox: [f64; 4],
+    pub features: Features,
+    pub assets: RuntimeAssets,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeAssets {
+    pub vector_tiles: Option<String>,
+    pub style_json: Option<String>,
+    pub valhalla_tiles: Option<String>,
+    pub search_index: Option<String>,
+    pub poi_index: Option<String>,
+    pub gtfs: Option<String>,
+}
+
 #[derive(Debug)]
 pub enum PackError {
     Io(std::io::Error),
@@ -389,6 +409,27 @@ pub fn resolve_asset_path(pack: &Path, kind: &str) -> Result<PathBuf, PackError>
     Ok(path)
 }
 
+pub fn runtime_config(pack: &Path) -> Result<RuntimeConfig, PackError> {
+    let inspection = inspect_pack(pack)?;
+    require_clean_inspection(&inspection)?;
+
+    Ok(RuntimeConfig {
+        id: inspection.manifest.id,
+        name: inspection.manifest.name,
+        version: inspection.manifest.version,
+        bbox: inspection.manifest.region.bbox,
+        features: inspection.manifest.features,
+        assets: RuntimeAssets {
+            vector_tiles: optional_asset_path(pack, "vector_tiles")?,
+            style_json: optional_asset_path(pack, "style_json")?,
+            valhalla_tiles: optional_asset_path(pack, "valhalla_tiles")?,
+            search_index: optional_asset_path(pack, "search_index")?,
+            poi_index: optional_asset_path(pack, "poi_index")?,
+            gtfs: optional_asset_path(pack, "gtfs")?,
+        },
+    })
+}
+
 pub fn read_manifest(path: &Path) -> Result<Manifest, PackError> {
     let contents = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&contents)?)
@@ -577,6 +618,19 @@ fn require_clean_inspection(inspection: &Inspection) -> Result<(), PackError> {
         )));
     }
     Ok(())
+}
+
+fn optional_asset_path(pack: &Path, kind: &str) -> Result<Option<String>, PackError> {
+    let manifest = read_manifest(&pack.join("manifest.json"))?;
+    validate_manifest(&manifest)?;
+
+    if !declares_kind(&manifest, kind) {
+        return Ok(None);
+    }
+
+    let path = resolve_asset_path(pack, kind)?;
+    let resolved = fs::canonicalize(path)?;
+    Ok(Some(resolved.to_string_lossy().to_string()))
 }
 
 fn append_pack_dir(
@@ -881,6 +935,48 @@ mod tests {
 
         fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(store).ok();
+        fs::remove_dir_all(source.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn runtime_config_exposes_resolved_local_assets() {
+        let pack = temp_pack_dir("runtime-config-pack");
+        let source = temp_pack_dir("runtime-config-source").join("tiles.pmtiles");
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"local tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        add_file_to_pack(AddFileOptions {
+            pack: pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("file should attach");
+
+        let config = runtime_config(&pack).expect("runtime config should build");
+        assert_eq!(config.id, "region-pack");
+        assert!(config.features.rendering);
+        assert!(config
+            .assets
+            .vector_tiles
+            .unwrap()
+            .ends_with("map/tiles.pmtiles"));
+        assert_eq!(config.assets.valhalla_tiles, None);
+
+        fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(source.parent().unwrap()).ok();
     }
 

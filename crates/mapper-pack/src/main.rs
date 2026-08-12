@@ -1,7 +1,8 @@
 use mapper_pack::{
     add_file_to_pack, bundle_pack, init_pack, inspect_pack, install_bundle, install_pack,
-    list_installed_packs, required_toolchain, resolve_asset_path, unpack_bundle, AddFileOptions,
-    BundleOptions, InitOptions, InstallBundleOptions, InstallOptions, UnpackOptions,
+    list_installed_packs, required_toolchain, resolve_asset_path, runtime_config, unpack_bundle,
+    AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions, InstallOptions,
+    UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -75,6 +76,11 @@ fn main() {
         }),
         "asset" => parse_asset(args.collect()).and_then(|(pack, kind)| {
             println!("{}", resolve_asset_path(&pack, &kind)?.display());
+            Ok(())
+        }),
+        "runtime-config" => parse_pack_arg(args.collect(), "runtime-config").and_then(|pack| {
+            let config = runtime_config(&pack)?;
+            println!("{}", serde_json::to_string_pretty(&config)?);
             Ok(())
         }),
         "toolchain" => {
@@ -413,6 +419,30 @@ fn parse_asset(args: Vec<String>) -> Result<(PathBuf, String), mapper_pack::Pack
     Ok((required(pack, "--pack")?, required(kind, "--kind")?))
 }
 
+fn parse_pack_arg(args: Vec<String>, command: &str) -> Result<PathBuf, mapper_pack::PackError> {
+    let mut pack = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--pack" => pack = Some(PathBuf::from(value)),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown {command} option: {flag}"
+                )));
+            }
+        }
+    }
+
+    required(pack, "--pack")
+}
+
 fn parse_bbox(value: &str) -> Result<[f64; 4], mapper_pack::PackError> {
     let parts: Vec<&str> = value.split(',').collect();
     if parts.len() != 4 {
@@ -447,5 +477,6 @@ fn print_help() {
     println!("  mapper-pack install-bundle --archive <file.mapperpack.tar> --store <dir>");
     println!("  mapper-pack list --store <dir>");
     println!("  mapper-pack asset --pack <dir> --kind <kind>");
+    println!("  mapper-pack runtime-config --pack <dir>");
     println!("  mapper-pack toolchain");
 }

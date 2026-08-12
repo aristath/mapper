@@ -127,3 +127,10 @@ cargo run -p mapper-pack -- asset \
   --pack target/installed-packs/region \
   --kind vector_tiles
 ```
+
+Emit app-facing runtime JSON for an installed pack:
+
+```bash
+cargo run -p mapper-pack -- runtime-config \
+  --pack target/installed-packs/region
+```

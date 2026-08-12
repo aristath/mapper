@@ -33,6 +33,7 @@ local pack store.
 Current asset kinds:
 
 - `vector_tiles`
+- `style_json`
 - `valhalla_tiles`
 - `search_index`
 - `poi_index`
