@@ -1,0 +1,17 @@
+target/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.iml
+.idea/
+.vscode/
+*.log
+*.mbtiles
+*.pmtiles
+*.sqlite
+*.sqlite3
+*.osm.pbf
+*.gtfs.zip
+
