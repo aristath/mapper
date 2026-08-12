@@ -13,7 +13,7 @@ Examples:
 
 - Install and remove cleanly.
 - Work without network after download.
-- Support incremental updates later.
+- Support verified replacement updates.
 - Keep enough metadata to explain freshness and attribution.
 - Keep rendering, routing, and search versions in sync.
 - Move across the network as one downloadable archive.
@@ -25,6 +25,8 @@ directory, validates it, then installs it into the local pack store. An installe
 pack is a local directory with a validated `manifest.json`.
 
 The app should resolve assets by declared `kind`, not by guessing filenames.
+The selected pack is store state, held in `active-pack.json`, not a file inside
+the pack itself.
 
 Pack install must reject missing or corrupt assets. Every declared file is
 checked against its manifest `bytes` and `sha256` before it is copied into the
@@ -48,6 +50,10 @@ download `url`, archive `bytes`, archive `sha256`, and advertised `features`.
 The app can use the registry to show downloadable regions. Installation must
 download the selected bundle into a cache, verify its byte size and SHA-256, then
 install the bundle through the normal pack installer.
+
+Updates use the same registry verification path, unpack into a temporary store
+directory, validate the bundle, confirm the manifest id matches the requested
+installed pack, then replace the installed directory.
 
 ## Draft Layout
 

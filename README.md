@@ -165,6 +165,20 @@ List installed packs:
 cargo run -p mapper-pack -- list --store target/installed-packs
 ```
 
+Select the installed pack the app should open:
+
+```bash
+cargo run -p mapper-pack -- active-set \
+  --store target/installed-packs \
+  --id region
+```
+
+Show the selected pack:
+
+```bash
+cargo run -p mapper-pack -- active-get --store target/installed-packs
+```
+
 Remove an installed pack:
 
 ```bash
@@ -186,4 +200,11 @@ Emit app-facing runtime JSON for an installed pack:
 ```bash
 cargo run -p mapper-pack -- runtime-config \
   --pack target/installed-packs/region
+```
+
+Emit runtime JSON for the selected installed pack:
+
+```bash
+cargo run -p mapper-pack -- active-runtime-config \
+  --store target/installed-packs
 ```

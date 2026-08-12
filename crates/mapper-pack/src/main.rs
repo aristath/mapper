@@ -1,10 +1,10 @@
 use mapper_pack::{
-    add_default_style_to_pack, add_file_to_pack, add_pack_to_registry, bundle_pack, init_pack,
-    inspect_pack, install_bundle, install_from_registry, install_pack, list_installed_packs,
-    read_registry, required_toolchain, resolve_asset_path, runtime_config, unpack_bundle,
-    update_from_registry, AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions,
-    InstallFromRegistryOptions, InstallOptions, RegistryAddOptions, UninstallOptions,
-    UnpackOptions,
+    active_pack, active_runtime_config, add_default_style_to_pack, add_file_to_pack,
+    add_pack_to_registry, bundle_pack, init_pack, inspect_pack, install_bundle,
+    install_from_registry, install_pack, list_installed_packs, read_registry, required_toolchain,
+    resolve_asset_path, runtime_config, set_active_pack, unpack_bundle, update_from_registry,
+    AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions, InstallFromRegistryOptions,
+    InstallOptions, RegistryAddOptions, UninstallOptions, UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -111,7 +111,7 @@ fn main() {
             );
             Ok(())
         }),
-        "list" => parse_store(args.collect()).and_then(|store| {
+        "list" => parse_store_for_command(args.collect(), "list").and_then(|store| {
             for pack in list_installed_packs(&store)? {
                 println!(
                     "{}\t{}\t{}\t{}",
@@ -128,6 +128,27 @@ fn main() {
             println!("uninstalled {}", removed.display());
             Ok(())
         }),
+        "active-set" => parse_active_set(args.collect()).and_then(|(store, id)| {
+            let pack = set_active_pack(&store, &id)?;
+            println!(
+                "active {} {} at {}",
+                pack.id,
+                pack.version,
+                pack.path.display()
+            );
+            Ok(())
+        }),
+        "active-get" => parse_store_for_command(args.collect(), "active-get").and_then(|store| {
+            let pack = active_pack(&store)?;
+            println!(
+                "{}\t{}\t{}\t{}",
+                pack.id,
+                pack.version,
+                pack.name,
+                pack.path.display()
+            );
+            Ok(())
+        }),
         "asset" => parse_asset(args.collect()).and_then(|(pack, kind)| {
             println!("{}", resolve_asset_path(&pack, &kind)?.display());
             Ok(())
@@ -137,6 +158,12 @@ fn main() {
             println!("{}", serde_json::to_string_pretty(&config)?);
             Ok(())
         }),
+        "active-runtime-config" => parse_store_for_command(args.collect(), "active-runtime-config")
+            .and_then(|store| {
+                let config = active_runtime_config(&store)?;
+                println!("{}", serde_json::to_string_pretty(&config)?);
+                Ok(())
+            }),
         "toolchain" => {
             toolchain_command();
             Ok(())
@@ -522,7 +549,10 @@ fn parse_registry_arg(args: Vec<String>, command: &str) -> Result<PathBuf, mappe
     required(registry, "--registry")
 }
 
-fn parse_store(args: Vec<String>) -> Result<PathBuf, mapper_pack::PackError> {
+fn parse_store_for_command(
+    args: Vec<String>,
+    command: &str,
+) -> Result<PathBuf, mapper_pack::PackError> {
     let mut store = None;
 
     let mut iter = args.into_iter();
@@ -537,13 +567,39 @@ fn parse_store(args: Vec<String>) -> Result<PathBuf, mapper_pack::PackError> {
             "--store" => store = Some(PathBuf::from(value)),
             _ => {
                 return Err(mapper_pack::PackError::Invalid(format!(
-                    "unknown list option: {flag}"
+                    "unknown {command} option: {flag}"
                 )));
             }
         }
     }
 
     required(store, "--store")
+}
+
+fn parse_active_set(args: Vec<String>) -> Result<(PathBuf, String), mapper_pack::PackError> {
+    let mut store = None;
+    let mut id = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--store" => store = Some(PathBuf::from(value)),
+            "--id" => id = Some(value),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown active-set option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok((required(store, "--store")?, required(id, "--id")?))
 }
 
 fn parse_uninstall(args: Vec<String>) -> Result<UninstallOptions, mapper_pack::PackError> {
@@ -664,7 +720,10 @@ fn print_help() {
     println!("  mapper-pack update-from-registry --registry <registry.json> --id <id> --cache <dir> --store <dir>");
     println!("  mapper-pack list --store <dir>");
     println!("  mapper-pack uninstall --store <dir> --id <id>");
+    println!("  mapper-pack active-set --store <dir> --id <id>");
+    println!("  mapper-pack active-get --store <dir>");
     println!("  mapper-pack asset --pack <dir> --kind <kind>");
     println!("  mapper-pack runtime-config --pack <dir>");
+    println!("  mapper-pack active-runtime-config --store <dir>");
     println!("  mapper-pack toolchain");
 }

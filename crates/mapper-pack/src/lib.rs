@@ -76,6 +76,12 @@ pub struct InstalledPack {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActivePackSelection {
+    pub schema: u32,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RuntimeConfig {
     pub id: String,
     pub name: String,
@@ -558,7 +564,39 @@ pub fn uninstall_pack(options: UninstallOptions) -> Result<PathBuf, PackError> {
     }
 
     fs::remove_dir_all(&target)?;
+    if read_active_selection(&options.store)
+        .map(|selection| selection.id == options.id)
+        .unwrap_or(false)
+    {
+        fs::remove_file(active_pack_path(&options.store)).ok();
+    }
     Ok(target)
+}
+
+pub fn set_active_pack(store: &Path, id: &str) -> Result<InstalledPack, PackError> {
+    validate_pack_id(id)?;
+
+    let pack = installed_pack(store, id)?;
+    fs::create_dir_all(store)?;
+    write_json(
+        &active_pack_path(store),
+        &ActivePackSelection {
+            schema: 1,
+            id: id.to_string(),
+        },
+    )?;
+
+    Ok(pack)
+}
+
+pub fn active_pack(store: &Path) -> Result<InstalledPack, PackError> {
+    let selection = read_active_selection(store)?;
+    installed_pack(store, &selection.id)
+}
+
+pub fn active_runtime_config(store: &Path) -> Result<RuntimeConfig, PackError> {
+    let pack = active_pack(store)?;
+    runtime_config(&pack.path)
 }
 
 fn fetch_registry_archive(options: &InstallFromRegistryOptions) -> Result<PathBuf, PackError> {
@@ -633,6 +671,59 @@ fn replace_installed_pack(
         version: inspection.manifest.version,
         path: target,
     })
+}
+
+fn installed_pack(store: &Path, id: &str) -> Result<InstalledPack, PackError> {
+    validate_pack_id(id)?;
+
+    let path = store.join(id);
+    if !path.exists() {
+        return Err(PackError::Invalid(format!("pack is not installed: {id}")));
+    }
+    if !path.is_dir() {
+        return Err(PackError::Invalid(format!(
+            "installed pack path is not a directory: {}",
+            path.display()
+        )));
+    }
+
+    let manifest = read_manifest(&path.join("manifest.json"))?;
+    validate_manifest(&manifest)?;
+    if manifest.id != id {
+        return Err(PackError::Invalid(format!(
+            "installed pack id mismatch: expected {}, found {}",
+            id, manifest.id
+        )));
+    }
+
+    Ok(InstalledPack {
+        id: manifest.id,
+        name: manifest.name,
+        version: manifest.version,
+        path,
+    })
+}
+
+fn read_active_selection(store: &Path) -> Result<ActivePackSelection, PackError> {
+    let path = active_pack_path(store);
+    if !path.exists() {
+        return Err(PackError::Invalid("no active pack selected".to_string()));
+    }
+
+    let contents = fs::read_to_string(path)?;
+    let selection: ActivePackSelection = serde_json::from_str(&contents)?;
+    if selection.schema != 1 {
+        return Err(PackError::Invalid(format!(
+            "unsupported active pack schema: {}",
+            selection.schema
+        )));
+    }
+    validate_pack_id(&selection.id)?;
+    Ok(selection)
+}
+
+fn active_pack_path(store: &Path) -> PathBuf {
+    store.join("active-pack.json")
 }
 
 pub fn resolve_asset_path(pack: &Path, kind: &str) -> Result<PathBuf, PackError> {
@@ -1478,6 +1569,68 @@ mod tests {
         assert_eq!(removed, installed.path);
         assert!(!removed.exists());
         assert!(list_installed_packs(&store).unwrap().is_empty());
+
+        fs::remove_dir_all(pack).ok();
+        fs::remove_dir_all(store).ok();
+        fs::remove_dir_all(source.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn active_pack_selection_controls_runtime_config() {
+        let pack = temp_pack_dir("active-pack");
+        let source = temp_pack_dir("active-source").join("tiles.pmtiles");
+        let store = temp_pack_dir("active-store");
+
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"local tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        add_file_to_pack(AddFileOptions {
+            pack: pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("file should attach");
+        add_default_style_to_pack(&pack).expect("style should generate");
+
+        let installed = install_pack(InstallOptions {
+            pack: pack.clone(),
+            store: store.clone(),
+        })
+        .expect("pack should install");
+
+        assert!(active_pack(&store).is_err());
+
+        let active = set_active_pack(&store, "region-pack").expect("active pack should set");
+        assert_eq!(active, installed);
+        assert_eq!(
+            active_pack(&store).expect("active pack should read").id,
+            "region-pack"
+        );
+
+        let config = active_runtime_config(&store).expect("active runtime config should emit");
+        assert_eq!(config.id, "region-pack");
+        assert!(config.assets.style_json.is_some());
+
+        uninstall_pack(UninstallOptions {
+            store: store.clone(),
+            id: "region-pack".to_string(),
+        })
+        .expect("active pack should uninstall");
+        assert!(active_pack(&store).is_err());
 
         fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(store).ok();
