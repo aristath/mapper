@@ -1,5 +1,6 @@
 use mapper_pack::{
-    add_file_to_pack, init_pack, inspect_pack, required_toolchain, AddFileOptions, InitOptions,
+    add_file_to_pack, init_pack, inspect_pack, install_pack, list_installed_packs,
+    required_toolchain, resolve_asset_path, AddFileOptions, InitOptions, InstallOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -27,6 +28,32 @@ fn main() {
         "add-file" => parse_add_file(args.collect()).and_then(|options| {
             let file = add_file_to_pack(options)?;
             println!("added {} ({} bytes, {})", file.path, file.bytes, file.kind);
+            Ok(())
+        }),
+        "install" => parse_install(args.collect()).and_then(|options| {
+            let installed = install_pack(options)?;
+            println!(
+                "installed {} {} at {}",
+                installed.id,
+                installed.version,
+                installed.path.display()
+            );
+            Ok(())
+        }),
+        "list" => parse_store(args.collect()).and_then(|store| {
+            for pack in list_installed_packs(&store)? {
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    pack.id,
+                    pack.version,
+                    pack.name,
+                    pack.path.display()
+                );
+            }
+            Ok(())
+        }),
+        "asset" => parse_asset(args.collect()).and_then(|(pack, kind)| {
+            println!("{}", resolve_asset_path(&pack, &kind)?.display());
             Ok(())
         }),
         "toolchain" => {
@@ -192,6 +219,85 @@ fn parse_add_file(args: Vec<String>) -> Result<AddFileOptions, mapper_pack::Pack
     })
 }
 
+fn parse_install(args: Vec<String>) -> Result<InstallOptions, mapper_pack::PackError> {
+    let mut pack = None;
+    let mut store = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--pack" => pack = Some(PathBuf::from(value)),
+            "--store" => store = Some(PathBuf::from(value)),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown install option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok(InstallOptions {
+        pack: required(pack, "--pack")?,
+        store: required(store, "--store")?,
+    })
+}
+
+fn parse_store(args: Vec<String>) -> Result<PathBuf, mapper_pack::PackError> {
+    let mut store = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--store" => store = Some(PathBuf::from(value)),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown list option: {flag}"
+                )));
+            }
+        }
+    }
+
+    required(store, "--store")
+}
+
+fn parse_asset(args: Vec<String>) -> Result<(PathBuf, String), mapper_pack::PackError> {
+    let mut pack = None;
+    let mut kind = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--pack" => pack = Some(PathBuf::from(value)),
+            "--kind" => kind = Some(value),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown asset option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok((required(pack, "--pack")?, required(kind, "--kind")?))
+}
+
 fn parse_bbox(value: &str) -> Result<[f64; 4], mapper_pack::PackError> {
     let parts: Vec<&str> = value.split(',').collect();
     if parts.len() != 4 {
@@ -220,5 +326,8 @@ fn print_help() {
     println!("  mapper-pack init --out <dir> --id <id> --name <name> --country <code> --bbox <min_lon,min_lat,max_lon,max_lat> --version <version> --generated-at <iso-date> --osm-extract <file>");
     println!("  mapper-pack inspect <pack-path>");
     println!("  mapper-pack add-file --pack <dir> --source <file> --pack-path <relative-path> --kind <kind> [--feature <feature>]");
+    println!("  mapper-pack install --pack <dir> --store <dir>");
+    println!("  mapper-pack list --store <dir>");
+    println!("  mapper-pack asset --pack <dir> --kind <kind>");
     println!("  mapper-pack toolchain");
 }

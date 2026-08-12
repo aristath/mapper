@@ -58,6 +58,14 @@ pub struct Inspection {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstalledPack {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub path: PathBuf,
+}
+
 #[derive(Debug)]
 pub enum PackError {
     Io(std::io::Error),
@@ -194,6 +202,85 @@ pub fn add_file_to_pack(options: AddFileOptions) -> Result<PackFile, PackError> 
     Ok(pack_file)
 }
 
+pub fn install_pack(options: InstallOptions) -> Result<InstalledPack, PackError> {
+    let inspection = inspect_pack(&options.pack)?;
+    if !inspection.missing_files.is_empty() {
+        return Err(PackError::Invalid(format!(
+            "pack has {} missing file(s)",
+            inspection.missing_files.len()
+        )));
+    }
+
+    let target = options.store.join(&inspection.manifest.id);
+    if target.exists() {
+        return Err(PackError::Invalid(format!(
+            "pack is already installed: {}",
+            target.display()
+        )));
+    }
+
+    fs::create_dir_all(&options.store)?;
+    copy_dir(&options.pack, &target)?;
+
+    Ok(InstalledPack {
+        id: inspection.manifest.id,
+        name: inspection.manifest.name,
+        version: inspection.manifest.version,
+        path: target,
+    })
+}
+
+pub fn list_installed_packs(store: &Path) -> Result<Vec<InstalledPack>, PackError> {
+    if !store.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut packs = Vec::new();
+    for entry in fs::read_dir(store)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() || !path.join("manifest.json").exists() {
+            continue;
+        }
+
+        let manifest = read_manifest(&path.join("manifest.json"))?;
+        validate_manifest(&manifest)?;
+        packs.push(InstalledPack {
+            id: manifest.id,
+            name: manifest.name,
+            version: manifest.version,
+            path,
+        });
+    }
+
+    packs.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(packs)
+}
+
+pub fn resolve_asset_path(pack: &Path, kind: &str) -> Result<PathBuf, PackError> {
+    let manifest = read_manifest(&pack.join("manifest.json"))?;
+    validate_manifest(&manifest)?;
+
+    let file = manifest
+        .files
+        .iter()
+        .find(|file| file.kind == kind)
+        .ok_or_else(|| PackError::Invalid(format!("pack has no file of kind: {kind}")))?;
+
+    let relative_path = Path::new(&file.path);
+    validate_relative_pack_path(relative_path)?;
+
+    let path = pack.join(relative_path);
+    if !path.exists() {
+        return Err(PackError::Invalid(format!(
+            "asset is missing: {}",
+            path.display()
+        )));
+    }
+
+    Ok(path)
+}
+
 pub fn read_manifest(path: &Path) -> Result<Manifest, PackError> {
     let contents = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&contents)?)
@@ -280,6 +367,12 @@ pub struct AddFileOptions {
     pub feature: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstallOptions {
+    pub pack: PathBuf,
+    pub store: PathBuf,
+}
+
 fn validate_pack_id(id: &str) -> Result<(), PackError> {
     let valid = !id.is_empty()
         && id
@@ -341,6 +434,25 @@ fn declares_kind(manifest: &Manifest, kind: &str) -> bool {
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), PackError> {
     let json = serde_json::to_string_pretty(value)?;
     fs::write(path, format!("{json}\n"))?;
+    Ok(())
+}
+
+fn copy_dir(source: &Path, target: &Path) -> Result<(), PackError> {
+    fs::create_dir_all(target)?;
+
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        let file_type = entry.file_type()?;
+
+        if file_type.is_dir() {
+            copy_dir(&source_path, &target_path)?;
+        } else if file_type.is_file() {
+            fs::copy(&source_path, &target_path)?;
+        }
+    }
+
     Ok(())
 }
 
@@ -501,6 +613,57 @@ mod tests {
         let error = validate_relative_pack_path(Path::new("../outside.pmtiles"))
             .expect_err("escaping path should fail");
         assert!(error.to_string().contains("parent"));
+    }
+
+    #[test]
+    fn installs_pack_and_resolves_vector_tiles() {
+        let pack = temp_pack_dir("install-pack");
+        let source = temp_pack_dir("source-tiles").join("tiles.pmtiles");
+        let store = temp_pack_dir("store");
+
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"local tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        add_file_to_pack(AddFileOptions {
+            pack: pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("file should attach");
+
+        let installed = install_pack(InstallOptions {
+            pack: pack.clone(),
+            store: store.clone(),
+        })
+        .expect("pack should install");
+
+        assert_eq!(installed.id, "region-pack");
+        assert!(installed.path.join("manifest.json").exists());
+
+        let packs = list_installed_packs(&store).expect("store should list");
+        assert_eq!(packs.len(), 1);
+
+        let tiles =
+            resolve_asset_path(&installed.path, "vector_tiles").expect("asset should resolve");
+        assert!(tiles.ends_with("map/tiles.pmtiles"));
+
+        fs::remove_dir_all(pack).ok();
+        fs::remove_dir_all(store).ok();
+        fs::remove_dir_all(source.parent().unwrap()).ok();
     }
 
     fn sample_manifest() -> Manifest {

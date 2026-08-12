@@ -89,3 +89,25 @@ cargo run -p mapper-pack -- add-file \
   --kind vector_tiles \
   --feature rendering
 ```
+
+Install a pack into a local pack store:
+
+```bash
+cargo run -p mapper-pack -- install \
+  --pack target/region.mapperpack \
+  --store target/installed-packs
+```
+
+List installed packs:
+
+```bash
+cargo run -p mapper-pack -- list --store target/installed-packs
+```
+
+Resolve the local path for an app asset:
+
+```bash
+cargo run -p mapper-pack -- asset \
+  --pack target/installed-packs/region \
+  --kind vector_tiles
+```

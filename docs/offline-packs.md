@@ -17,6 +17,20 @@ Examples:
 - Keep enough metadata to explain freshness and attribution.
 - Keep rendering, routing, and search versions in sync.
 
+## App Runtime Contract
+
+The app should treat an installed pack as a local directory with a validated
+`manifest.json`. It should resolve assets by declared `kind`, not by guessing
+filenames.
+
+Current asset kinds:
+
+- `vector_tiles`
+- `valhalla_tiles`
+- `search_index`
+- `poi_index`
+- `gtfs`
+
 ## Draft Layout
 
 ```text
