@@ -1,8 +1,8 @@
 use mapper_pack::{
-    add_file_to_pack, bundle_pack, init_pack, inspect_pack, install_bundle, install_pack,
-    list_installed_packs, required_toolchain, resolve_asset_path, runtime_config, unpack_bundle,
-    AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions, InstallOptions,
-    UnpackOptions,
+    add_default_style_to_pack, add_file_to_pack, bundle_pack, init_pack, inspect_pack,
+    install_bundle, install_pack, list_installed_packs, required_toolchain, resolve_asset_path,
+    runtime_config, unpack_bundle, AddFileOptions, BundleOptions, InitOptions,
+    InstallBundleOptions, InstallOptions, UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -32,6 +32,13 @@ fn main() {
             println!("added {} ({} bytes, {})", file.path, file.bytes, file.kind);
             Ok(())
         }),
+        "add-default-style" => {
+            parse_pack_arg(args.collect(), "add-default-style").and_then(|pack| {
+                let file = add_default_style_to_pack(&pack)?;
+                println!("added {} ({} bytes, {})", file.path, file.bytes, file.kind);
+                Ok(())
+            })
+        }
         "install" => parse_install(args.collect()).and_then(|options| {
             let installed = install_pack(options)?;
             println!(
@@ -471,6 +478,7 @@ fn print_help() {
     println!("  mapper-pack init --out <dir> --id <id> --name <name> --country <code> --bbox <min_lon,min_lat,max_lon,max_lat> --version <version> --generated-at <iso-date> --osm-extract <file>");
     println!("  mapper-pack inspect <pack-path>");
     println!("  mapper-pack add-file --pack <dir> --source <file> --pack-path <relative-path> --kind <kind> [--feature <feature>]");
+    println!("  mapper-pack add-default-style --pack <dir>");
     println!("  mapper-pack install --pack <dir> --store <dir>");
     println!("  mapper-pack bundle --pack <dir> --out <file.mapperpack.tar>");
     println!("  mapper-pack unpack --archive <file.mapperpack.tar> --out <dir>");

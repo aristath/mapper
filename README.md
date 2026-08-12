@@ -90,6 +90,13 @@ cargo run -p mapper-pack -- add-file \
   --feature rendering
 ```
 
+Generate a basic local MapLibre style for the pack:
+
+```bash
+cargo run -p mapper-pack -- add-default-style \
+  --pack target/region.mapperpack
+```
+
 Install a pack into a local pack store:
 
 ```bash

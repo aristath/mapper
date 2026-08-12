@@ -204,6 +204,9 @@ pub fn inspect_pack(path: &Path) -> Result<Inspection, PackError> {
     if manifest.features.rendering && !declares_kind(&manifest, "vector_tiles") {
         warnings.push("rendering is enabled but no vector_tiles file is declared".to_string());
     }
+    if manifest.features.rendering && !declares_kind(&manifest, "style_json") {
+        warnings.push("rendering is enabled but no style_json file is declared".to_string());
+    }
     if !manifest.features.routing.is_empty() && !declares_kind(&manifest, "valhalla_tiles") {
         warnings.push("routing is enabled but no valhalla_tiles file is declared".to_string());
     }
@@ -244,6 +247,43 @@ pub fn add_file_to_pack(options: AddFileOptions) -> Result<PackFile, PackError> 
     manifest.files.push(pack_file.clone());
     apply_feature(&mut manifest, &options.feature)?;
 
+    write_json(&manifest_path, &manifest)?;
+
+    Ok(pack_file)
+}
+
+pub fn add_default_style_to_pack(pack: &Path) -> Result<PackFile, PackError> {
+    let manifest_path = pack.join("manifest.json");
+    let mut manifest = read_manifest(&manifest_path)?;
+    validate_manifest(&manifest)?;
+
+    let tiles = manifest
+        .files
+        .iter()
+        .find(|file| file.kind == "vector_tiles")
+        .ok_or_else(|| PackError::Invalid("pack has no vector_tiles file".to_string()))?;
+    validate_relative_pack_path(Path::new(&tiles.path))?;
+
+    let style_path = PathBuf::from("map/style.json");
+    let target_path = pack.join(&style_path);
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let tile_url = format!("pmtiles://{}", tiles.path);
+    write_json(&target_path, &default_maplibre_style(&manifest, &tile_url))?;
+
+    let metadata = fs::metadata(&target_path)?;
+    let pack_file = PackFile {
+        path: style_path.to_string_lossy().to_string(),
+        kind: "style_json".to_string(),
+        bytes: metadata.len(),
+        sha256: sha256_file(&target_path)?,
+    };
+
+    manifest.files.retain(|file| file.path != pack_file.path);
+    manifest.files.push(pack_file.clone());
+    apply_feature(&mut manifest, &Some("rendering".to_string()))?;
     write_json(&manifest_path, &manifest)?;
 
     Ok(pack_file)
@@ -633,6 +673,110 @@ fn optional_asset_path(pack: &Path, kind: &str) -> Result<Option<String>, PackEr
     Ok(Some(resolved.to_string_lossy().to_string()))
 }
 
+fn default_maplibre_style(manifest: &Manifest, tile_url: &str) -> serde_json::Value {
+    let [min_lon, min_lat, max_lon, max_lat] = manifest.region.bbox;
+    let center_lon = (min_lon + max_lon) / 2.0;
+    let center_lat = (min_lat + max_lat) / 2.0;
+
+    serde_json::json!({
+        "version": 8,
+        "name": format!("{} Pixel", manifest.name),
+        "center": [center_lon, center_lat],
+        "zoom": 11,
+        "sources": {
+            "mapper": {
+                "type": "vector",
+                "url": tile_url
+            }
+        },
+        "layers": [
+            {
+                "id": "background",
+                "type": "background",
+                "paint": {
+                    "background-color": "#f1efe3"
+                }
+            },
+            {
+                "id": "water",
+                "type": "fill",
+                "source": "mapper",
+                "source-layer": "water",
+                "paint": {
+                    "fill-color": "#79b8c8"
+                }
+            },
+            {
+                "id": "parks",
+                "type": "fill",
+                "source": "mapper",
+                "source-layer": "park",
+                "paint": {
+                    "fill-color": "#8dbf67",
+                    "fill-opacity": 0.9
+                }
+            },
+            {
+                "id": "landuse",
+                "type": "fill",
+                "source": "mapper",
+                "source-layer": "landuse",
+                "paint": {
+                    "fill-color": "#d7c99d",
+                    "fill-opacity": 0.45
+                }
+            },
+            {
+                "id": "buildings",
+                "type": "fill",
+                "source": "mapper",
+                "source-layer": "building",
+                "minzoom": 13,
+                "paint": {
+                    "fill-color": "#c4b7a5",
+                    "fill-outline-color": "#8c8174"
+                }
+            },
+            {
+                "id": "roads-casing",
+                "type": "line",
+                "source": "mapper",
+                "source-layer": "transportation",
+                "paint": {
+                    "line-color": "#4f4a45",
+                    "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 16, 8]
+                }
+            },
+            {
+                "id": "roads",
+                "type": "line",
+                "source": "mapper",
+                "source-layer": "transportation",
+                "paint": {
+                    "line-color": "#f7d65a",
+                    "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.8, 16, 5]
+                }
+            },
+            {
+                "id": "places",
+                "type": "symbol",
+                "source": "mapper",
+                "source-layer": "place",
+                "layout": {
+                    "text-field": ["coalesce", ["get", "name"], ["get", "name:en"]],
+                    "text-size": ["interpolate", ["linear"], ["zoom"], 5, 10, 14, 15],
+                    "text-font": ["Open Sans Regular"]
+                },
+                "paint": {
+                    "text-color": "#2f2b28",
+                    "text-halo-color": "#f1efe3",
+                    "text-halo-width": 1
+                }
+            }
+        ]
+    })
+}
+
 fn append_pack_dir(
     builder: &mut tar::Builder<fs::File>,
     root: &Path,
@@ -975,6 +1119,52 @@ mod tests {
             .unwrap()
             .ends_with("map/tiles.pmtiles"));
         assert_eq!(config.assets.valhalla_tiles, None);
+
+        fs::remove_dir_all(pack).ok();
+        fs::remove_dir_all(source.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn add_default_style_declares_rendering_style_asset() {
+        let pack = temp_pack_dir("style-pack");
+        let source = temp_pack_dir("style-source").join("tiles.pmtiles");
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"local tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: pack.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        add_file_to_pack(AddFileOptions {
+            pack: pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("map/tiles.pmtiles"),
+            kind: "vector_tiles".to_string(),
+            feature: Some("rendering".to_string()),
+        })
+        .expect("file should attach");
+
+        let style = add_default_style_to_pack(&pack).expect("style should generate");
+        assert_eq!(style.path, "map/style.json");
+        assert_eq!(style.kind, "style_json");
+
+        let inspection = inspect_pack(&pack).expect("pack should inspect");
+        assert!(inspection.warnings.is_empty());
+
+        let config = runtime_config(&pack).expect("runtime config should build");
+        assert!(config
+            .assets
+            .style_json
+            .unwrap()
+            .ends_with("map/style.json"));
 
         fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(source.parent().unwrap()).ok();
