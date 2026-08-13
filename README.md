@@ -73,6 +73,15 @@ Build local vector tiles from an extract:
 scripts/build-vector-tiles.sh data/sources/monaco-latest.osm.pbf data/work/monaco.pmtiles
 ```
 
+Build local Valhalla routing tiles from an extract:
+
+```bash
+scripts/build-valhalla-tiles.sh \
+  data/sources/monaco-latest.osm.pbf \
+  data/work/valhalla_tiles.tar \
+  data/work/valhalla
+```
+
 Inspect a PMTiles archive:
 
 ```bash

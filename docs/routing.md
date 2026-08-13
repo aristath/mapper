@@ -28,6 +28,9 @@ Each routing-capable pack declares both `valhalla_tiles` and
 `valhalla_config`. The config is generated inside the pack and points Valhalla at
 the local tile archive, so app code can launch routing from resolved local asset
 paths instead of guessing filenames.
+`scripts/build-valhalla-tiles.sh` turns any local `.osm.pbf` extract into
+`valhalla_tiles.tar` using Valhalla's command-line builders, including timezone
+and admin databases when those tools are installed.
 Before launching Valhalla, Mapper materializes a runtime config that rewrites
 `mjolnir.tile_extract` to the absolute installed tile archive path.
 Route requests are generated as Valhalla-shaped JSON only after the pack is
