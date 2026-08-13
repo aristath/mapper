@@ -135,6 +135,19 @@ cargo run -p mapper-pack -- route-request \
   --mode walking
 ```
 
+Send a validated route request to a local Valhalla service:
+
+```bash
+cargo run -p mapper-pack -- route \
+  --pack target/region.mapperpack \
+  --endpoint http://127.0.0.1:8002 \
+  --from-lon 1.5 \
+  --from-lat 2.5 \
+  --to-lon 2.5 \
+  --to-lat 3.5 \
+  --mode walking
+```
+
 Install a pack into a local pack store:
 
 ```bash
@@ -278,6 +291,19 @@ Emit a validated Valhalla route request for the selected installed pack:
 ```bash
 cargo run -p mapper-pack -- active-route-request \
   --store target/installed-packs \
+  --from-lon 1.5 \
+  --from-lat 2.5 \
+  --to-lon 2.5 \
+  --to-lat 3.5 \
+  --mode walking
+```
+
+Send a validated active-pack route request to a local Valhalla service:
+
+```bash
+cargo run -p mapper-pack -- active-route \
+  --store target/installed-packs \
+  --endpoint http://127.0.0.1:8002 \
   --from-lon 1.5 \
   --from-lat 2.5 \
   --to-lon 2.5 \

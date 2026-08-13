@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1036,6 +1037,40 @@ pub fn active_route_request(
     route_request(&pack.path, from_lon, from_lat, to_lon, to_lat, mode)
 }
 
+pub fn post_valhalla_route(
+    endpoint: &str,
+    request: &ValhallaRouteRequest,
+) -> Result<serde_json::Value, PackError> {
+    let (host, port, path) = parse_http_endpoint(endpoint)?;
+    let body = serde_json::to_string(request)?;
+    let mut stream = TcpStream::connect((host.as_str(), port))?;
+
+    write!(
+        stream,
+        "POST {path} HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )?;
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response)?;
+    let (headers, body) = response
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| PackError::Invalid("invalid Valhalla HTTP response".to_string()))?;
+    let status = headers
+        .lines()
+        .next()
+        .ok_or_else(|| PackError::Invalid("missing Valhalla HTTP status".to_string()))?;
+
+    if !status.contains(" 200 ") {
+        return Err(PackError::Invalid(format!(
+            "Valhalla route request failed: {status}"
+        )));
+    }
+
+    Ok(serde_json::from_str(body)?)
+}
+
 pub fn read_manifest(path: &Path) -> Result<Manifest, PackError> {
     let contents = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&contents)?)
@@ -1337,6 +1372,33 @@ fn routing_mode_supported(modes: &[String], requested: &str, costing: &str) -> b
         mode == requested
             || matches!(valhalla_costing(mode).as_deref(), Ok(value) if value == costing)
     })
+}
+
+fn parse_http_endpoint(endpoint: &str) -> Result<(String, u16, String), PackError> {
+    let endpoint = endpoint.strip_prefix("http://").ok_or_else(|| {
+        PackError::Invalid("Valhalla endpoint must start with http://".to_string())
+    })?;
+    let (authority, path) = endpoint.split_once('/').unwrap_or((endpoint, "route"));
+    let path = if path.is_empty() {
+        "/route".to_string()
+    } else {
+        format!("/{path}")
+    };
+    let (host, port) = authority.rsplit_once(':').ok_or_else(|| {
+        PackError::Invalid("Valhalla endpoint must include host and port".to_string())
+    })?;
+
+    if host.is_empty() {
+        return Err(PackError::Invalid(
+            "Valhalla endpoint host cannot be empty".to_string(),
+        ));
+    }
+
+    let port = port
+        .parse::<u16>()
+        .map_err(|_| PackError::Invalid(format!("invalid Valhalla endpoint port: {port}")))?;
+
+    Ok((host.to_string(), port, path))
 }
 
 fn declares_kind(manifest: &Manifest, kind: &str) -> bool {
@@ -2416,6 +2478,63 @@ mod tests {
         fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(runtime_output.parent().unwrap()).ok();
         fs::remove_dir_all(source.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn posts_route_request_to_local_valhalla_endpoint() {
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let port = listener.local_addr().unwrap().port();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("request should arrive");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("read timeout should set");
+            let mut buffer = [0_u8; 4096];
+            let mut request = Vec::new();
+            loop {
+                let bytes = stream.read(&mut buffer).expect("request should read");
+                if bytes == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..bytes]);
+                let request_text = String::from_utf8_lossy(&request);
+                if request_text.contains("\r\n\r\n")
+                    && request_text.contains("\"costing\":\"pedestrian\"")
+                {
+                    break;
+                }
+            }
+            let request = String::from_utf8_lossy(&request);
+
+            assert!(request.starts_with("POST /route HTTP/1.1"));
+            assert!(request.contains("\"costing\":\"pedestrian\""));
+            assert!(request.contains("\"lon\":1.5"));
+
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"trip\":{\"status_message\":\"Found route\"}}",
+                )
+                .expect("response should write");
+        });
+
+        let response = post_valhalla_route(
+            &format!("http://127.0.0.1:{port}"),
+            &ValhallaRouteRequest {
+                locations: vec![
+                    RouteLocation { lon: 1.5, lat: 2.5 },
+                    RouteLocation { lon: 2.5, lat: 3.5 },
+                ],
+                costing: "pedestrian".to_string(),
+            },
+        )
+        .expect("route response should parse");
+
+        assert_eq!(response["trip"]["status_message"], "Found route");
+        handle.join().expect("server thread should finish");
     }
 
     #[test]

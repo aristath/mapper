@@ -33,6 +33,8 @@ Before launching Valhalla, Mapper materializes a runtime config that rewrites
 Route requests are generated as Valhalla-shaped JSON only after the pack is
 validated, the requested routing mode is declared by the pack, and both
 endpoints are inside the pack bounding box.
+Mapper can post that request directly to a local `http://host:port` Valhalla
+service and return the JSON route response.
 
 Mapper should provide:
 
