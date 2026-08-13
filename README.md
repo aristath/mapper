@@ -259,6 +259,27 @@ cargo run -p mapper-pack -- registry-status \
   --store target/installed-packs
 ```
 
+List downloadable packs that cover a position:
+
+```bash
+cargo run -p mapper-pack -- registry-covering \
+  --registry target/registry.json \
+  --lon 2.0 \
+  --lat 3.0
+```
+
+List downloadable packs that can route between two points:
+
+```bash
+cargo run -p mapper-pack -- registry-route-pack \
+  --registry target/registry.json \
+  --from-lon 1.5 \
+  --from-lat 2.5 \
+  --to-lon 2.5 \
+  --to-lat 3.5 \
+  --mode walking
+```
+
 Download, verify, and install a pack from a registry:
 
 ```bash

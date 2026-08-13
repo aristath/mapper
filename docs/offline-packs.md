@@ -57,6 +57,10 @@ download the selected bundle into a cache, verify its byte size and SHA-256, the
 install the bundle through the normal pack installer.
 Registry status combines downloadable pack metadata with the local store so the
 app can show installed, update available, active, and not installed states.
+The app can query the registry by lon/lat before download; matching packs are
+sorted by smallest bounding box first so a city pack is offered before a broader
+regional pack. Route-specific registry queries require both endpoints to be
+inside the pack bbox and the requested routing mode to be advertised by the pack.
 
 Updates use the same registry verification path, unpack into a temporary store
 directory, validate the bundle, confirm the manifest id matches the requested

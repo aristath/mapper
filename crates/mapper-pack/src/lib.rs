@@ -578,6 +578,49 @@ pub fn registry_status(registry_path: &Path, store: &Path) -> Result<RegistrySta
     })
 }
 
+pub fn registry_covering_packs(
+    registry_path: &Path,
+    lon: f64,
+    lat: f64,
+) -> Result<Vec<RegistryPack>, PackError> {
+    validate_lon_lat(lon, lat)?;
+    let registry = read_registry(registry_path)?;
+    let mut packs: Vec<RegistryPack> = registry
+        .packs
+        .into_iter()
+        .filter(|pack| bbox_contains(pack.bbox, lon, lat))
+        .collect();
+
+    sort_registry_packs_by_area(&mut packs);
+    Ok(packs)
+}
+
+pub fn registry_route_packs(
+    registry_path: &Path,
+    from_lon: f64,
+    from_lat: f64,
+    to_lon: f64,
+    to_lat: f64,
+    mode: &str,
+) -> Result<Vec<RegistryPack>, PackError> {
+    validate_lon_lat(from_lon, from_lat)?;
+    validate_lon_lat(to_lon, to_lat)?;
+    let costing = valhalla_costing(mode)?;
+    let registry = read_registry(registry_path)?;
+    let mut packs: Vec<RegistryPack> = registry
+        .packs
+        .into_iter()
+        .filter(|pack| {
+            bbox_contains(pack.bbox, from_lon, from_lat)
+                && bbox_contains(pack.bbox, to_lon, to_lat)
+                && routing_mode_supported(&pack.features.routing, mode, &costing)
+        })
+        .collect();
+
+    sort_registry_packs_by_area(&mut packs);
+    Ok(packs)
+}
+
 pub fn add_pack_to_registry(options: RegistryAddOptions) -> Result<RegistryPack, PackError> {
     let inspection = inspect_pack(&options.pack)?;
     require_clean_inspection(&inspection)?;
@@ -1449,6 +1492,14 @@ fn bbox_contains(bbox: [f64; 4], lon: f64, lat: f64) -> bool {
 fn bbox_area(bbox: [f64; 4]) -> f64 {
     let [min_lon, min_lat, max_lon, max_lat] = bbox;
     (max_lon - min_lon) * (max_lat - min_lat)
+}
+
+fn sort_registry_packs_by_area(packs: &mut [RegistryPack]) {
+    packs.sort_by(|left, right| {
+        bbox_area(left.bbox)
+            .total_cmp(&bbox_area(right.bbox))
+            .then_with(|| left.id.cmp(&right.id))
+    });
 }
 
 fn validate_route_endpoint(
@@ -2380,6 +2431,112 @@ mod tests {
         fs::remove_dir_all(pack).ok();
         fs::remove_dir_all(registry_path.parent().unwrap()).ok();
         fs::remove_dir_all(store).ok();
+    }
+
+    #[test]
+    fn registry_queries_select_smallest_covering_and_route_capable_packs() {
+        let registry_path = temp_pack_dir("registry-queries").join("registry.json");
+        fs::create_dir_all(registry_path.parent().expect("registry should have parent")).unwrap();
+
+        write_json(
+            &registry_path,
+            &Registry {
+                schema: 1,
+                generated_at: "2026-08-13T00:00:00Z".to_string(),
+                packs: vec![
+                    RegistryPack {
+                        id: "large-region".to_string(),
+                        name: "Large Region".to_string(),
+                        version: "2026.08.13".to_string(),
+                        country: "ZZ".to_string(),
+                        bbox: [0.0, 0.0, 10.0, 10.0],
+                        url: "file:///tmp/large-region.mapperpack.tar".to_string(),
+                        bytes: 10,
+                        sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .to_string(),
+                        features: Features {
+                            rendering: true,
+                            routing: vec!["pedestrian".to_string(), "auto".to_string()],
+                            search: false,
+                            transit: false,
+                        },
+                    },
+                    RegistryPack {
+                        id: "small-region".to_string(),
+                        name: "Small Region".to_string(),
+                        version: "2026.08.13".to_string(),
+                        country: "ZZ".to_string(),
+                        bbox: [1.0, 1.0, 3.0, 3.0],
+                        url: "file:///tmp/small-region.mapperpack.tar".to_string(),
+                        bytes: 10,
+                        sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                            .to_string(),
+                        features: Features {
+                            rendering: true,
+                            routing: vec!["pedestrian".to_string()],
+                            search: false,
+                            transit: false,
+                        },
+                    },
+                    RegistryPack {
+                        id: "outside-region".to_string(),
+                        name: "Outside Region".to_string(),
+                        version: "2026.08.13".to_string(),
+                        country: "ZZ".to_string(),
+                        bbox: [20.0, 20.0, 30.0, 30.0],
+                        url: "file:///tmp/outside-region.mapperpack.tar".to_string(),
+                        bytes: 10,
+                        sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                            .to_string(),
+                        features: Features {
+                            rendering: true,
+                            routing: vec!["pedestrian".to_string()],
+                            search: false,
+                            transit: false,
+                        },
+                    },
+                ],
+            },
+        )
+        .unwrap();
+
+        let covering =
+            registry_covering_packs(&registry_path, 2.0, 2.0).expect("coverage should resolve");
+        assert_eq!(
+            covering
+                .iter()
+                .map(|pack| pack.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["small-region", "large-region"]
+        );
+
+        let walking = registry_route_packs(&registry_path, 1.5, 1.5, 2.5, 2.5, "walking")
+            .expect("walking route packs should resolve");
+        assert_eq!(
+            walking
+                .iter()
+                .map(|pack| pack.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["small-region", "large-region"]
+        );
+
+        let driving = registry_route_packs(&registry_path, 1.5, 1.5, 2.5, 2.5, "driving")
+            .expect("driving route packs should resolve");
+        assert_eq!(
+            driving
+                .iter()
+                .map(|pack| pack.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["large-region"]
+        );
+
+        assert!(
+            registry_route_packs(&registry_path, 1.5, 1.5, 20.0, 20.0, "walking")
+                .unwrap()
+                .is_empty()
+        );
+
+        fs::remove_dir_all(registry_path.parent().unwrap()).ok();
     }
 
     #[test]
