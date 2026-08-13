@@ -327,6 +327,18 @@ pub fn add_file_to_pack(options: AddFileOptions) -> Result<PackFile, PackError> 
     Ok(pack_file)
 }
 
+pub fn enable_feature(pack: &Path, feature: &str) -> Result<Features, PackError> {
+    let manifest_path = pack.join("manifest.json");
+    let mut manifest = read_manifest(&manifest_path)?;
+    validate_manifest(&manifest)?;
+
+    apply_feature(&mut manifest, &Some(feature.to_string()))?;
+    let features = manifest.features.clone();
+    write_json(&manifest_path, &manifest)?;
+
+    Ok(features)
+}
+
 pub fn add_default_style_to_pack(pack: &Path) -> Result<PackFile, PackError> {
     let manifest_path = pack.join("manifest.json");
     let mut manifest = read_manifest(&manifest_path)?;
@@ -1876,6 +1888,35 @@ mod tests {
 
         fs::remove_dir_all(dir).ok();
         fs::remove_dir_all(source.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn enable_feature_updates_manifest_without_adding_files() {
+        let dir = temp_pack_dir("enable-feature");
+
+        init_pack(InitOptions {
+            output: dir.clone(),
+            id: "region-pack".to_string(),
+            name: "Region Pack".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "region.osm.pbf".to_string(),
+        })
+        .expect("pack should initialize");
+
+        let features = enable_feature(&dir, "routing:pedestrian").expect("feature should enable");
+        assert_eq!(features.routing, vec!["pedestrian"]);
+
+        let features = enable_feature(&dir, "routing:bicycle").expect("feature should enable");
+        assert_eq!(features.routing, vec!["pedestrian", "bicycle"]);
+
+        let manifest = read_manifest(&dir.join("manifest.json")).unwrap();
+        assert!(manifest.files.is_empty());
+        assert_eq!(manifest.features.routing, vec!["pedestrian", "bicycle"]);
+
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]

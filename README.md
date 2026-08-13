@@ -88,6 +88,24 @@ Inspect a PMTiles archive:
 scripts/inspect-vector-tiles.sh data/work/monaco.pmtiles
 ```
 
+Assemble a pack from generated artifacts:
+
+```bash
+scripts/assemble-pack.sh \
+  --out target/region.mapperpack \
+  --id region \
+  --name "Region" \
+  --country ZZ \
+  --bbox 1.0,2.0,3.0,4.0 \
+  --version 2026.08.12 \
+  --generated-at 2026-08-12T00:00:00Z \
+  --osm-extract region.osm.pbf \
+  --vector-tiles data/work/monaco.pmtiles \
+  --valhalla-tiles data/work/valhalla_tiles.tar \
+  --routing-modes pedestrian,bicycle,auto \
+  --bundle target/region.mapperpack.tar
+```
+
 Attach generated vector tiles to a pack:
 
 ```bash

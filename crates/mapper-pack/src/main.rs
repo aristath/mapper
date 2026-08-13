@@ -1,7 +1,7 @@
 use mapper_pack::{
     active_pack, active_route_request, active_runtime_config, add_default_style_to_pack,
     add_default_valhalla_config_to_pack, add_file_to_pack, add_pack_to_registry, bundle_pack,
-    init_pack, inspect_pack, install_bundle, install_from_registry, install_pack,
+    enable_feature, init_pack, inspect_pack, install_bundle, install_from_registry, install_pack,
     list_installed_packs, materialize_valhalla_runtime_config, post_valhalla_route, read_registry,
     registry_status, required_toolchain, resolve_asset_path, route_request, runtime_config,
     set_active_pack, set_active_pack_at, store_snapshot, unpack_bundle, update_from_registry,
@@ -34,6 +34,11 @@ fn main() {
         "add-file" => parse_add_file(args.collect()).and_then(|options| {
             let file = add_file_to_pack(options)?;
             println!("added {} ({} bytes, {})", file.path, file.bytes, file.kind);
+            Ok(())
+        }),
+        "enable-feature" => parse_enable_feature(args.collect()).and_then(|(pack, feature)| {
+            enable_feature(&pack, &feature)?;
+            println!("enabled {feature}");
             Ok(())
         }),
         "add-default-style" => {
@@ -443,6 +448,32 @@ fn parse_add_file(args: Vec<String>) -> Result<AddFileOptions, mapper_pack::Pack
         kind: required(kind, "--kind")?,
         feature,
     })
+}
+
+fn parse_enable_feature(args: Vec<String>) -> Result<(PathBuf, String), mapper_pack::PackError> {
+    let mut pack = None;
+    let mut feature = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--pack" => pack = Some(PathBuf::from(value)),
+            "--feature" => feature = Some(value),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown enable-feature option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok((required(pack, "--pack")?, required(feature, "--feature")?))
 }
 
 fn parse_install(args: Vec<String>) -> Result<InstallOptions, mapper_pack::PackError> {
@@ -1058,6 +1089,7 @@ fn print_help() {
     println!("  mapper-pack init --out <dir> --id <id> --name <name> --country <code> --bbox <min_lon,min_lat,max_lon,max_lat> --version <version> --generated-at <iso-date> --osm-extract <file>");
     println!("  mapper-pack inspect <pack-path>");
     println!("  mapper-pack add-file --pack <dir> --source <file> --pack-path <relative-path> --kind <kind> [--feature <feature>]");
+    println!("  mapper-pack enable-feature --pack <dir> --feature <feature>");
     println!("  mapper-pack add-default-style --pack <dir>");
     println!("  mapper-pack add-default-valhalla-config --pack <dir>");
     println!("  mapper-pack install --pack <dir> --store <dir>");
