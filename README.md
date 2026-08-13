@@ -291,6 +291,18 @@ cargo run -p mapper-pack -- active-set-at \
   --lat 3.0
 ```
 
+List installed packs that can route between two points:
+
+```bash
+cargo run -p mapper-pack -- route-pack \
+  --store target/installed-packs \
+  --from-lon 1.5 \
+  --from-lat 2.5 \
+  --to-lon 2.5 \
+  --to-lat 3.5 \
+  --mode walking
+```
+
 Remove an installed pack:
 
 ```bash
@@ -333,10 +345,36 @@ cargo run -p mapper-pack -- active-route-request \
   --mode walking
 ```
 
+Emit a validated Valhalla route request using the smallest route-capable installed pack:
+
+```bash
+cargo run -p mapper-pack -- route-request-at \
+  --store target/installed-packs \
+  --from-lon 1.5 \
+  --from-lat 2.5 \
+  --to-lon 2.5 \
+  --to-lat 3.5 \
+  --mode walking
+```
+
 Send a validated active-pack route request to a local Valhalla service:
 
 ```bash
 cargo run -p mapper-pack -- active-route \
+  --store target/installed-packs \
+  --endpoint http://127.0.0.1:8002 \
+  --from-lon 1.5 \
+  --from-lat 2.5 \
+  --to-lon 2.5 \
+  --to-lat 3.5 \
+  --mode walking
+```
+
+Send a validated route request from the smallest route-capable installed pack
+to a local Valhalla service:
+
+```bash
+cargo run -p mapper-pack -- route-at \
   --store target/installed-packs \
   --endpoint http://127.0.0.1:8002 \
   --from-lon 1.5 \

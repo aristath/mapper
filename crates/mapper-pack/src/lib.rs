@@ -118,6 +118,12 @@ pub struct ValhallaRouteRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ResolvedRouteRequest {
+    pub pack: InstalledPack,
+    pub request: ValhallaRouteRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoreSnapshot {
     pub installed: Vec<InstalledPack>,
     pub active: Option<InstalledPack>,
@@ -764,6 +770,46 @@ pub fn covering_packs(store: &Path, lon: f64, lat: f64) -> Result<Vec<InstalledP
     Ok(packs)
 }
 
+pub fn routing_packs(
+    store: &Path,
+    from_lon: f64,
+    from_lat: f64,
+    to_lon: f64,
+    to_lat: f64,
+    mode: &str,
+) -> Result<Vec<InstalledPack>, PackError> {
+    validate_lon_lat(from_lon, from_lat)?;
+    validate_lon_lat(to_lon, to_lat)?;
+    let costing = valhalla_costing(mode)?;
+
+    let mut packs = Vec::new();
+    for pack in list_installed_packs(store)? {
+        if !bbox_contains(pack.bbox, from_lon, from_lat)
+            || !bbox_contains(pack.bbox, to_lon, to_lat)
+        {
+            continue;
+        }
+
+        let manifest = read_manifest(&pack.path.join("manifest.json"))?;
+        validate_manifest(&manifest)?;
+        if !routing_mode_supported(&manifest.features.routing, mode, &costing) {
+            continue;
+        }
+
+        if route_request(&pack.path, from_lon, from_lat, to_lon, to_lat, mode).is_ok() {
+            packs.push(pack);
+        }
+    }
+
+    packs.sort_by(|left, right| {
+        bbox_area(left.bbox)
+            .total_cmp(&bbox_area(right.bbox))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    Ok(packs)
+}
+
 pub fn store_snapshot(store: &Path) -> Result<StoreSnapshot, PackError> {
     let installed = list_installed_packs(store)?;
     let mut warnings = Vec::new();
@@ -1047,6 +1093,27 @@ pub fn active_route_request(
 ) -> Result<ValhallaRouteRequest, PackError> {
     let pack = active_pack(store)?;
     route_request(&pack.path, from_lon, from_lat, to_lon, to_lat, mode)
+}
+
+pub fn route_request_at(
+    store: &Path,
+    from_lon: f64,
+    from_lat: f64,
+    to_lon: f64,
+    to_lat: f64,
+    mode: &str,
+) -> Result<ResolvedRouteRequest, PackError> {
+    let pack = routing_packs(store, from_lon, from_lat, to_lon, to_lat, mode)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            PackError::Invalid(format!(
+                "no installed pack can route {mode} from {from_lon},{from_lat} to {to_lon},{to_lat}"
+            ))
+        })?;
+    let request = route_request(&pack.path, from_lon, from_lat, to_lon, to_lat, mode)?;
+
+    Ok(ResolvedRouteRequest { pack, request })
 }
 
 pub fn post_valhalla_route(
@@ -2346,6 +2413,101 @@ mod tests {
 
         fs::remove_dir_all(small_pack).ok();
         fs::remove_dir_all(large_pack).ok();
+        fs::remove_dir_all(store).ok();
+    }
+
+    #[test]
+    fn route_request_at_selects_smallest_route_capable_pack() {
+        let small_pack = temp_pack_dir("routing-small-pack");
+        let large_pack = temp_pack_dir("routing-large-pack");
+        let source = temp_pack_dir("routing-source").join("valhalla_tiles.tar");
+        let store = temp_pack_dir("routing-store");
+
+        fs::create_dir_all(source.parent().expect("source should have parent")).unwrap();
+        fs::write(&source, b"local valhalla tile bytes").unwrap();
+
+        init_pack(InitOptions {
+            output: large_pack.clone(),
+            id: "large-region".to_string(),
+            name: "Large Region".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [0.0, 0.0, 10.0, 10.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "large-region.osm.pbf".to_string(),
+        })
+        .expect("large pack should initialize");
+        add_file_to_pack(AddFileOptions {
+            pack: large_pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("routing/valhalla_tiles.tar"),
+            kind: "valhalla_tiles".to_string(),
+            feature: Some("routing:pedestrian".to_string()),
+        })
+        .expect("large routing tiles should attach");
+        enable_feature(&large_pack, "routing:auto").expect("auto should enable");
+        add_default_valhalla_config_to_pack(&large_pack).expect("large config should generate");
+
+        init_pack(InitOptions {
+            output: small_pack.clone(),
+            id: "small-region".to_string(),
+            name: "Small Region".to_string(),
+            country: "ZZ".to_string(),
+            bbox: [1.0, 1.0, 3.0, 3.0],
+            version: "2026.08.12".to_string(),
+            generated_at: "2026-08-12T00:00:00Z".to_string(),
+            osm_extract: "small-region.osm.pbf".to_string(),
+        })
+        .expect("small pack should initialize");
+        add_file_to_pack(AddFileOptions {
+            pack: small_pack.clone(),
+            source: source.clone(),
+            pack_path: PathBuf::from("routing/valhalla_tiles.tar"),
+            kind: "valhalla_tiles".to_string(),
+            feature: Some("routing:pedestrian".to_string()),
+        })
+        .expect("small routing tiles should attach");
+        add_default_valhalla_config_to_pack(&small_pack).expect("small config should generate");
+
+        install_pack(InstallOptions {
+            pack: large_pack.clone(),
+            store: store.clone(),
+        })
+        .expect("large pack should install");
+        install_pack(InstallOptions {
+            pack: small_pack.clone(),
+            store: store.clone(),
+        })
+        .expect("small pack should install");
+
+        let matches = routing_packs(&store, 1.5, 1.5, 2.5, 2.5, "walking")
+            .expect("route-capable packs should resolve");
+        assert_eq!(
+            matches
+                .iter()
+                .map(|pack| pack.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["small-region", "large-region"]
+        );
+
+        let walking = route_request_at(&store, 1.5, 1.5, 2.5, 2.5, "walking")
+            .expect("walking route should resolve");
+        assert_eq!(walking.pack.id, "small-region");
+        assert_eq!(walking.request.costing, "pedestrian");
+
+        let driving = route_request_at(&store, 1.5, 1.5, 2.5, 2.5, "driving")
+            .expect("driving route should resolve");
+        assert_eq!(driving.pack.id, "large-region");
+        assert_eq!(driving.request.costing, "auto");
+
+        assert!(route_request_at(&store, 1.5, 1.5, 20.0, 20.0, "walking")
+            .unwrap_err()
+            .to_string()
+            .contains("no installed pack can route"));
+
+        fs::remove_dir_all(small_pack).ok();
+        fs::remove_dir_all(large_pack).ok();
+        fs::remove_dir_all(source.parent().unwrap()).ok();
         fs::remove_dir_all(store).ok();
     }
 

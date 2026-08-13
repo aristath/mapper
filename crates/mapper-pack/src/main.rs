@@ -3,10 +3,11 @@ use mapper_pack::{
     add_default_valhalla_config_to_pack, add_file_to_pack, add_pack_to_registry, bundle_pack,
     enable_feature, init_pack, inspect_pack, install_bundle, install_from_registry, install_pack,
     list_installed_packs, materialize_valhalla_runtime_config, post_valhalla_route, read_registry,
-    registry_status, required_toolchain, resolve_asset_path, route_request, runtime_config,
-    set_active_pack, set_active_pack_at, store_snapshot, unpack_bundle, update_from_registry,
-    AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions, InstallFromRegistryOptions,
-    InstallOptions, RegistryAddOptions, UninstallOptions, UnpackOptions,
+    registry_status, required_toolchain, resolve_asset_path, route_request, route_request_at,
+    routing_packs, runtime_config, set_active_pack, set_active_pack_at, store_snapshot,
+    unpack_bundle, update_from_registry, AddFileOptions, BundleOptions, InitOptions,
+    InstallBundleOptions, InstallFromRegistryOptions, InstallOptions, RegistryAddOptions,
+    UninstallOptions, UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -258,6 +259,64 @@ fn main() {
                 Ok(())
             })
         }
+        "route-pack" => {
+            parse_store_route_request(args.collect(), "route-pack").and_then(|request| {
+                if request.endpoint.is_some() {
+                    return Err(mapper_pack::PackError::Invalid(
+                        "route-pack does not use --endpoint".to_string(),
+                    ));
+                }
+                for pack in routing_packs(
+                    &request.store,
+                    request.from_lon,
+                    request.from_lat,
+                    request.to_lon,
+                    request.to_lat,
+                    &request.mode,
+                )? {
+                    println!(
+                        "{}\t{}\t{}\t{}",
+                        pack.id,
+                        pack.version,
+                        pack.name,
+                        pack.path.display()
+                    );
+                }
+                Ok(())
+            })
+        }
+        "route-request-at" => parse_store_route_request(args.collect(), "route-request-at")
+            .and_then(|request| {
+                if request.endpoint.is_some() {
+                    return Err(mapper_pack::PackError::Invalid(
+                        "route-request-at does not use --endpoint".to_string(),
+                    ));
+                }
+                let route = route_request_at(
+                    &request.store,
+                    request.from_lon,
+                    request.from_lat,
+                    request.to_lon,
+                    request.to_lat,
+                    &request.mode,
+                )?;
+                println!("{}", serde_json::to_string_pretty(&route)?);
+                Ok(())
+            }),
+        "route-at" => parse_store_route_request(args.collect(), "route-at").and_then(|request| {
+            let endpoint = required(request.endpoint, "--endpoint")?;
+            let route = route_request_at(
+                &request.store,
+                request.from_lon,
+                request.from_lat,
+                request.to_lon,
+                request.to_lat,
+                &request.mode,
+            )?;
+            let response = post_valhalla_route(&endpoint, &route.request)?;
+            println!("{}", serde_json::to_string_pretty(&response)?);
+            Ok(())
+        }),
         "store-snapshot" => {
             parse_store_for_command(args.collect(), "store-snapshot").and_then(|store| {
                 let snapshot = store_snapshot(&store)?;
@@ -1114,6 +1173,9 @@ fn print_help() {
     println!("  mapper-pack active-runtime-config --store <dir>");
     println!("  mapper-pack active-route-request --store <dir> --from-lon <lon> --from-lat <lat> --to-lon <lon> --to-lat <lat> --mode <mode>");
     println!("  mapper-pack active-route --store <dir> --endpoint <http://host:port> --from-lon <lon> --from-lat <lat> --to-lon <lon> --to-lat <lat> --mode <mode>");
+    println!("  mapper-pack route-pack --store <dir> --from-lon <lon> --from-lat <lat> --to-lon <lon> --to-lat <lat> --mode <mode>");
+    println!("  mapper-pack route-request-at --store <dir> --from-lon <lon> --from-lat <lat> --to-lon <lon> --to-lat <lat> --mode <mode>");
+    println!("  mapper-pack route-at --store <dir> --endpoint <http://host:port> --from-lon <lon> --from-lat <lat> --to-lon <lon> --to-lat <lat> --mode <mode>");
     println!("  mapper-pack store-snapshot --store <dir>");
     println!("  mapper-pack covering --store <dir> --lon <lon> --lat <lat>");
     println!("  mapper-pack toolchain");
