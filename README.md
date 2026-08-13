@@ -150,12 +150,38 @@ cargo run -p mapper-pack -- valhalla-runtime-config \
   --out target/valhalla-runtime/region.json
 ```
 
+Materialize a Valhalla runtime config for the smallest route-capable installed pack:
+
+```bash
+cargo run -p mapper-pack -- valhalla-runtime-config-at \
+  --store target/installed-packs \
+  --out target/valhalla-runtime/route.json \
+  --from-lon 1.5 \
+  --from-lat 2.5 \
+  --to-lon 2.5 \
+  --to-lat 3.5 \
+  --mode walking
+```
+
 Start a local Valhalla service for a pack:
 
 ```bash
 scripts/run-valhalla-service.sh \
   target/region.mapperpack \
   target/valhalla-runtime/region.json
+```
+
+Start a local Valhalla service for the smallest route-capable installed pack:
+
+```bash
+scripts/run-valhalla-route-service.sh \
+  --store target/installed-packs \
+  --from-lon 1.5 \
+  --from-lat 2.5 \
+  --to-lon 2.5 \
+  --to-lat 3.5 \
+  --mode walking \
+  --runtime-config target/valhalla-runtime/route.json
 ```
 
 Emit a validated Valhalla route request for a pack:

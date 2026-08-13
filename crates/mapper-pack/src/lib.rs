@@ -124,6 +124,12 @@ pub struct ResolvedRouteRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ResolvedValhallaRuntimeConfig {
+    pub pack: InstalledPack,
+    pub config_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoreSnapshot {
     pub installed: Vec<InstalledPack>,
     pub active: Option<InstalledPack>,
@@ -1043,6 +1049,24 @@ pub fn materialize_valhalla_runtime_config(
     }
     write_json(output, &config)?;
     Ok(output.to_path_buf())
+}
+
+pub fn materialize_valhalla_runtime_config_at(
+    store: &Path,
+    from_lon: f64,
+    from_lat: f64,
+    to_lon: f64,
+    to_lat: f64,
+    mode: &str,
+    output: &Path,
+) -> Result<ResolvedValhallaRuntimeConfig, PackError> {
+    let route = route_request_at(store, from_lon, from_lat, to_lon, to_lat, mode)?;
+    let config_path = materialize_valhalla_runtime_config(&route.pack.path, output)?;
+
+    Ok(ResolvedValhallaRuntimeConfig {
+        pack: route.pack,
+        config_path,
+    })
 }
 
 pub fn route_request(
@@ -2500,6 +2524,30 @@ mod tests {
         assert_eq!(driving.pack.id, "large-region");
         assert_eq!(driving.request.costing, "auto");
 
+        let runtime_output = temp_pack_dir("routing-runtime-output").join("valhalla.json");
+        let resolved_runtime = materialize_valhalla_runtime_config_at(
+            &store,
+            1.5,
+            1.5,
+            2.5,
+            2.5,
+            "walking",
+            &runtime_output,
+        )
+        .expect("runtime config should materialize from route");
+        assert_eq!(resolved_runtime.pack.id, "small-region");
+        assert_eq!(resolved_runtime.config_path, runtime_output);
+        let runtime_json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&resolved_runtime.config_path).unwrap())
+                .unwrap();
+        assert_eq!(
+            runtime_json["mjolnir"]["tile_extract"],
+            fs::canonicalize(store.join("small-region/routing/valhalla_tiles.tar"))
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        );
+
         assert!(route_request_at(&store, 1.5, 1.5, 20.0, 20.0, "walking")
             .unwrap_err()
             .to_string()
@@ -2508,6 +2556,7 @@ mod tests {
         fs::remove_dir_all(small_pack).ok();
         fs::remove_dir_all(large_pack).ok();
         fs::remove_dir_all(source.parent().unwrap()).ok();
+        fs::remove_dir_all(resolved_runtime.config_path.parent().unwrap()).ok();
         fs::remove_dir_all(store).ok();
     }
 

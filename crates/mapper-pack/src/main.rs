@@ -2,12 +2,13 @@ use mapper_pack::{
     active_pack, active_route_request, active_runtime_config, add_default_style_to_pack,
     add_default_valhalla_config_to_pack, add_file_to_pack, add_pack_to_registry, bundle_pack,
     enable_feature, init_pack, inspect_pack, install_bundle, install_from_registry, install_pack,
-    list_installed_packs, materialize_valhalla_runtime_config, post_valhalla_route, read_registry,
-    registry_status, required_toolchain, resolve_asset_path, route_request, route_request_at,
-    routing_packs, runtime_config, set_active_pack, set_active_pack_at, store_snapshot,
-    unpack_bundle, update_from_registry, AddFileOptions, BundleOptions, InitOptions,
-    InstallBundleOptions, InstallFromRegistryOptions, InstallOptions, RegistryAddOptions,
-    UninstallOptions, UnpackOptions,
+    list_installed_packs, materialize_valhalla_runtime_config,
+    materialize_valhalla_runtime_config_at, post_valhalla_route, read_registry, registry_status,
+    required_toolchain, resolve_asset_path, route_request, route_request_at, routing_packs,
+    runtime_config, set_active_pack, set_active_pack_at, store_snapshot, unpack_bundle,
+    update_from_registry, AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions,
+    InstallFromRegistryOptions, InstallOptions, RegistryAddOptions, UninstallOptions,
+    UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -196,6 +197,23 @@ fn main() {
                 println!("{}", output.display());
                 Ok(())
             }),
+        "valhalla-runtime-config-at" => {
+            parse_store_route_out(args.collect(), "valhalla-runtime-config-at").and_then(
+                |(request, output)| {
+                    let resolved = materialize_valhalla_runtime_config_at(
+                        &request.store,
+                        request.from_lon,
+                        request.from_lat,
+                        request.to_lon,
+                        request.to_lat,
+                        &request.mode,
+                        &output,
+                    )?;
+                    println!("{}", serde_json::to_string_pretty(&resolved)?);
+                    Ok(())
+                },
+            )
+        }
         "route-request" => {
             parse_pack_route_request(args.collect(), "route-request").and_then(|request| {
                 let route = route_request(
@@ -1041,6 +1059,39 @@ fn parse_store_route_request(
     })
 }
 
+fn parse_store_route_out(
+    args: Vec<String>,
+    command: &str,
+) -> Result<(StoreRouteArgs, PathBuf), mapper_pack::PackError> {
+    let mut route_args = Vec::new();
+    let mut output = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        if flag == "--out" {
+            output = Some(PathBuf::from(value));
+        } else {
+            route_args.push(flag);
+            route_args.push(value);
+        }
+    }
+
+    let request = parse_store_route_request(route_args, command)?;
+    if request.endpoint.is_some() {
+        return Err(mapper_pack::PackError::Invalid(format!(
+            "{command} does not use --endpoint"
+        )));
+    }
+
+    Ok((request, required(output, "--out")?))
+}
+
 type RouteFields = (
     Option<PathBuf>,
     Option<PathBuf>,
@@ -1168,6 +1219,7 @@ fn print_help() {
     println!("  mapper-pack asset --pack <dir> --kind <kind>");
     println!("  mapper-pack runtime-config --pack <dir>");
     println!("  mapper-pack valhalla-runtime-config --pack <dir> --out <valhalla.json>");
+    println!("  mapper-pack valhalla-runtime-config-at --store <dir> --out <valhalla.json> --from-lon <lon> --from-lat <lat> --to-lon <lon> --to-lat <lat> --mode <mode>");
     println!("  mapper-pack route-request --pack <dir> --from-lon <lon> --from-lat <lat> --to-lon <lon> --to-lat <lat> --mode <mode>");
     println!("  mapper-pack route --pack <dir> --endpoint <http://host:port> --from-lon <lon> --from-lat <lat> --to-lon <lon> --to-lat <lat> --mode <mode>");
     println!("  mapper-pack active-runtime-config --store <dir>");
