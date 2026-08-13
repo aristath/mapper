@@ -132,6 +132,14 @@ cargo run -p mapper-pack -- valhalla-runtime-config \
   --out target/valhalla-runtime/region.json
 ```
 
+Start a local Valhalla service for a pack:
+
+```bash
+scripts/run-valhalla-service.sh \
+  target/region.mapperpack \
+  target/valhalla-runtime/region.json
+```
+
 Emit a validated Valhalla route request for a pack:
 
 ```bash

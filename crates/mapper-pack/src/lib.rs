@@ -1088,8 +1088,16 @@ pub fn required_toolchain() -> Vec<Tool> {
         ("osmium", "clip and inspect OpenStreetMap extracts"),
         ("tilemaker", "build local vector tiles from OSM data"),
         (
+            "valhalla_build_config",
+            "generate Valhalla routing build/runtime configuration",
+        ),
+        (
             "valhalla_build_tiles",
             "build offline Valhalla routing graph tiles",
+        ),
+        (
+            "valhalla_service",
+            "serve offline Valhalla routing requests locally",
         ),
         ("pmtiles", "package vector tiles for offline map rendering"),
     ]
@@ -1818,7 +1826,14 @@ mod tests {
 
         assert_eq!(
             names,
-            vec!["osmium", "tilemaker", "valhalla_build_tiles", "pmtiles"]
+            vec![
+                "osmium",
+                "tilemaker",
+                "valhalla_build_config",
+                "valhalla_build_tiles",
+                "valhalla_service",
+                "pmtiles"
+            ]
         );
     }
 

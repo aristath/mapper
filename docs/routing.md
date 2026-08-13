@@ -33,6 +33,8 @@ paths instead of guessing filenames.
 and admin databases when those tools are installed.
 Before launching Valhalla, Mapper materializes a runtime config that rewrites
 `mjolnir.tile_extract` to the absolute installed tile archive path.
+`scripts/run-valhalla-service.sh` materializes that config and starts
+`valhalla_service` in the foreground for the selected pack.
 Route requests are generated as Valhalla-shaped JSON only after the pack is
 validated, the requested routing mode is declared by the pack, and both
 endpoints are inside the pack bounding box.
