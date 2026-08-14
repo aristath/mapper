@@ -40,6 +40,23 @@ else
   exit 1
 fi
 
+if command -v pmtiles >/dev/null 2>&1; then
+  pmtiles cluster "$output"
+elif command -v podman >/dev/null 2>&1; then
+  podman run --rm --pull missing \
+    -v "$output_dir:/data/output:Z" \
+    docker.io/protomaps/go-pmtiles:latest \
+    cluster "$container_output"
+elif command -v docker >/dev/null 2>&1; then
+  docker run --rm --pull missing \
+    -v "$output_dir:/data/output:z" \
+    docker.io/protomaps/go-pmtiles:latest \
+    cluster "$container_output"
+else
+  printf 'missing pmtiles and no docker/podman fallback found\n' >&2
+  exit 1
+fi
+
 sha256sum "$output" > "$output.sha256"
 
 printf 'wrote %s\n' "$output"

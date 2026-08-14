@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:mapper_app/src/mapper_models.dart';
 import 'package:mapper_app/src/mapper_pack_client.dart';
+import 'package:pmtiles/pmtiles.dart';
 
 Future<void> main(List<String> args) async {
   final repoRoot = Directory('../..').absolute.path;
@@ -38,6 +39,14 @@ Future<void> main(List<String> args) async {
   final vectorTiles = runtime.assets.vectorTiles;
   if (vectorTiles == null || !File(vectorTiles).existsSync()) {
     stderr.writeln('active runtime has no readable vector tiles: $vectorTiles');
+    exit(1);
+  }
+  final archive = await PmTilesArchive.fromFile(File(vectorTiles));
+  if (archive.header.maxZoom < archive.header.minZoom) {
+    stderr.writeln(
+      'active runtime has invalid vector tile zoom range: '
+      '${archive.header.minZoom}-${archive.header.maxZoom}',
+    );
     exit(1);
   }
 
