@@ -17,9 +17,13 @@ case "$source_ref" in
   *) url="https://download.geofabrik.de/$source_ref" ;;
 esac
 
-out="$out_dir/$output_name"
+case "$output_name" in
+  /*) out="$output_name" ;;
+  */*) out="$(realpath -m "$output_name")" ;;
+  *) out="$out_dir/$output_name" ;;
+esac
 
-mkdir -p "$out_dir"
+mkdir -p "$(dirname "$out")"
 
 curl --fail --location --continue-at - --output "$out" "$url"
 sha256sum "$out" > "$out.sha256"

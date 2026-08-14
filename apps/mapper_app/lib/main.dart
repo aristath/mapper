@@ -134,6 +134,10 @@ class _MapperHomeState extends State<MapperHome> {
           storePath: widget.storePath,
           catalogPath: widget.catalogPath,
           cachePath: 'target/map-cache',
+          viewport: _viewport,
+          installedPackIds: (_snapshot?.installed ?? const <InstalledPack>[])
+              .map((pack) => pack.id)
+              .toSet(),
           onStoreChanged: _refresh,
         );
       },
@@ -474,6 +478,8 @@ class MapsManagerSheet extends StatefulWidget {
     required this.storePath,
     required this.catalogPath,
     required this.cachePath,
+    required this.viewport,
+    required this.installedPackIds,
     required this.onStoreChanged,
   });
 
@@ -481,6 +487,8 @@ class MapsManagerSheet extends StatefulWidget {
   final String storePath;
   final String catalogPath;
   final String cachePath;
+  final MapViewport? viewport;
+  final Set<String> installedPackIds;
   final Future<void> Function() onStoreChanged;
 
   @override
@@ -489,6 +497,7 @@ class MapsManagerSheet extends StatefulWidget {
 
 class _MapsManagerSheetState extends State<MapsManagerSheet> {
   RegistryStatus? _status;
+  List<GeofabrikRegion>? _regions;
   Object? _error;
   bool _loading = false;
 
@@ -500,10 +509,21 @@ class _MapsManagerSheetState extends State<MapsManagerSheet> {
 
   Future<void> _loadCatalog() async {
     await _run(() async {
-      _status = await widget.client.registryStatus(
-        registryPath: widget.catalogPath,
-        storePath: widget.storePath,
-      );
+      try {
+        _status = await widget.client.registryStatus(
+          registryPath: widget.catalogPath,
+          storePath: widget.storePath,
+        );
+      } catch (_) {
+        final viewport = widget.viewport;
+        if (viewport == null) {
+          _regions = const [];
+          return;
+        }
+        _regions = await widget.client.downloadableRegionsCoveringViewport(
+          viewport: viewport,
+        );
+      }
     });
   }
 
@@ -551,6 +571,27 @@ class _MapsManagerSheetState extends State<MapsManagerSheet> {
         registryPath: widget.catalogPath,
         storePath: widget.storePath,
       );
+    });
+  }
+
+  Future<void> _installGeofabrik(GeofabrikRegion region) async {
+    await _run(() async {
+      if (!widget.installedPackIds.contains(region.id)) {
+        await widget.client.installGeofabrikRegion(
+          region: region,
+          storePath: widget.storePath,
+          cachePath: widget.cachePath,
+        );
+      } else {
+        await widget.client.setActivePack(
+          storePath: widget.storePath,
+          id: region.id,
+        );
+      }
+      await widget.onStoreChanged();
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
     });
   }
 
@@ -613,7 +654,10 @@ class _MapsManagerSheetState extends State<MapsManagerSheet> {
                 ],
               ),
               const SizedBox(height: 14),
-              if (_status == null && _error == null)
+              if (_loading &&
+                  _status == null &&
+                  _regions == null &&
+                  _error == null)
                 const _SheetMessage(
                   icon: Icons.map_outlined,
                   title: 'Loading map catalog',
@@ -625,11 +669,18 @@ class _MapsManagerSheetState extends State<MapsManagerSheet> {
                   loading: _loading,
                   onInstall: _installFromRegistry,
                 )
+              else if (_regions != null)
+                _GeofabrikRegionList(
+                  regions: _regions!,
+                  installedPackIds: widget.installedPackIds,
+                  loading: _loading,
+                  onInstall: _installGeofabrik,
+                )
               else
-                _SheetMessage(
-                  icon: Icons.cloud_off_outlined,
-                  title: 'No map catalog available',
-                  body: 'You can still import a Mapper pack from a downloaded file.',
+                const _SheetMessage(
+                  icon: Icons.travel_explore,
+                  title: 'No downloadable map for this view',
+                  body: 'Zoom in or move the map, then try again.',
                 ),
               const SizedBox(height: 14),
               OutlinedButton.icon(
@@ -944,6 +995,58 @@ class _RegistryPackList extends StatelessWidget {
             trailing: FilledButton(
               onPressed: loading ? null : () => onInstall(pack),
               child: Text(action),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _GeofabrikRegionList extends StatelessWidget {
+  const _GeofabrikRegionList({
+    required this.regions,
+    required this.installedPackIds,
+    required this.loading,
+    required this.onInstall,
+  });
+
+  final List<GeofabrikRegion> regions;
+  final Set<String> installedPackIds;
+  final bool loading;
+  final ValueChanged<GeofabrikRegion> onInstall;
+
+  @override
+  Widget build(BuildContext context) {
+    if (regions.isEmpty) {
+      return const _SheetMessage(
+        icon: Icons.travel_explore,
+        title: 'No downloadable map for this view',
+        body: 'Zoom in or move the map, then try again.',
+      );
+    }
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 320),
+      child: ListView.separated(
+        shrinkWrap: true,
+        itemCount: regions.length > 12 ? 12 : regions.length,
+        separatorBuilder: (_, _) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final region = regions[index];
+          final installed = installedPackIds.contains(region.id);
+          return ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(installed ? Icons.check_circle : Icons.public),
+            title: Text(region.name, overflow: TextOverflow.ellipsis),
+            subtitle: const Text(
+              'OpenStreetMap extract',
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: FilledButton.icon(
+              onPressed: loading ? null : () => onInstall(region),
+              icon: Icon(installed ? Icons.map : Icons.download),
+              label: Text(installed ? 'Open' : 'Download'),
             ),
           );
         },

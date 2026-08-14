@@ -76,6 +76,16 @@ opens the active pack's runtime assets. On Linux, the map surface reads the
 active pack's local PMTiles archive through `flutter_map`,
 `vector_map_tiles`, and `vector_map_tiles_pmtiles`.
 
+Run the real map-download e2e:
+
+```bash
+scripts/e2e-map-download.sh
+```
+
+The e2e downloads the Monaco OpenStreetMap extract from Geofabrik, builds
+PMTiles through the local tile builder path, assembles a Mapper pack, installs
+it, selects it, and verifies the active runtime points at local PMTiles.
+
 Download an OpenStreetMap extract:
 
 ```bash

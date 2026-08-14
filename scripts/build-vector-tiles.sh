@@ -23,16 +23,16 @@ container_output="/data/output/$(basename "$output")"
 
 if command -v tilemaker >/dev/null 2>&1; then
   tilemaker "$input" --output "$output"
-elif command -v docker >/dev/null 2>&1; then
-  docker run --rm --pull missing \
-    -v "$(dirname "$input"):/data/input:ro" \
-    -v "$output_dir:/data/output" \
-    ghcr.io/systemed/tilemaker:master \
-    "$container_input" --output "$container_output"
 elif command -v podman >/dev/null 2>&1; then
   podman run --rm --pull missing \
     -v "$(dirname "$input"):/data/input:ro,Z" \
     -v "$output_dir:/data/output:Z" \
+    ghcr.io/systemed/tilemaker:master \
+    "$container_input" --output "$container_output"
+elif command -v docker >/dev/null 2>&1; then
+  docker run --rm --pull missing \
+    -v "$(dirname "$input"):/data/input:ro,z" \
+    -v "$output_dir:/data/output:z" \
     ghcr.io/systemed/tilemaker:master \
     "$container_input" --output "$container_output"
 else
