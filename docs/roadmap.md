@@ -30,7 +30,7 @@ Current local-map scripts:
 
 ## Milestone 4: App Shell
 
-- Add Flutter app.
+- Add Flutter app. Started with `apps/mapper_app`.
 - Integrate MapLibre Native.
 - Add pack list, pack install status, active-pack selection, and map screen.
 - Bridge route requests to the local routing layer.

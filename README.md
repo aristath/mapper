@@ -26,6 +26,7 @@ The product goal is simple:
 
 - `docs/` - architecture, pack format, rendering, routing, and roadmap notes.
 - `crates/mapper-pack/` - Rust CLI entry point for offline city-pack tooling.
+- `apps/mapper_app/` - Flutter app shell for Linux, Android, and iOS.
 
 ## Current Status
 
@@ -60,6 +61,18 @@ Check whether the external open-source pack builders are installed:
 ```bash
 cargo run -p mapper-pack -- toolchain
 ```
+
+## App Shell
+
+Run the Linux app shell:
+
+```bash
+cd apps/mapper_app
+flutter run -d linux
+```
+
+The app reads the local pack store through `mapper-pack store-snapshot` and
+opens the active pack's runtime assets.
 
 Download an OpenStreetMap extract:
 
