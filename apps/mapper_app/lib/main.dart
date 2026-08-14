@@ -679,6 +679,7 @@ class DownloadAreaSheet extends StatefulWidget {
 
 class _DownloadAreaSheetState extends State<DownloadAreaSheet> {
   List<RegistryPack>? _packs;
+  List<GeofabrikRegion>? _regions;
   Object? _error;
   bool _loading = true;
 
@@ -705,6 +706,46 @@ class _DownloadAreaSheetState extends State<DownloadAreaSheet> {
         _packs = packs;
         _loading = false;
       });
+    } catch (error) {
+      try {
+        final regions = await widget.client.downloadableRegionsCoveringViewport(
+          viewport: widget.viewport,
+        );
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _regions = regions;
+          _error = null;
+          _loading = false;
+        });
+      } catch (fallbackError) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _error = fallbackError;
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _downloadGeofabrik(GeofabrikRegion region) async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await widget.client.installGeofabrikRegion(
+        region: region,
+        storePath: widget.storePath,
+        cachePath: widget.cachePath,
+      );
+      await widget.onStoreChanged();
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -753,6 +794,7 @@ class _DownloadAreaSheetState extends State<DownloadAreaSheet> {
   Widget build(BuildContext context) {
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
     final packs = _packs ?? const <RegistryPack>[];
+    final regions = _regions ?? const <GeofabrikRegion>[];
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 16, 16, bottom + 16),
       child: ConstrainedBox(
@@ -786,7 +828,7 @@ class _DownloadAreaSheetState extends State<DownloadAreaSheet> {
               ],
             ),
             const SizedBox(height: 14),
-            if (_loading && _packs == null)
+            if (_loading && _packs == null && _regions == null)
               const _SheetMessage(
                 icon: Icons.search,
                 title: 'Finding offline maps',
@@ -795,16 +837,16 @@ class _DownloadAreaSheetState extends State<DownloadAreaSheet> {
             else if (_error != null)
               _SheetMessage(
                 icon: Icons.cloud_off_outlined,
-                title: 'No catalog available',
-                body: 'The app can show the online map, but it needs a map catalog before it can download this area.',
+                title: 'No downloadable map found',
+                body: _error.toString(),
               )
-            else if (packs.isEmpty)
+            else if (packs.isEmpty && regions.isEmpty)
               const _SheetMessage(
                 icon: Icons.travel_explore,
                 title: 'No offline map covers this view',
-                body: 'Zoom in or move to an area available in the catalog.',
+                body: 'Zoom in or move to an area available for download.',
               )
-            else
+            else if (packs.isNotEmpty)
               ...packs.map(
                 (pack) => ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -828,7 +870,28 @@ class _DownloadAreaSheetState extends State<DownloadAreaSheet> {
                     ),
                   ),
                 ),
-              ),
+              )
+            else
+              ...regions
+                  .take(8)
+                  .map(
+                    (region) => ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.public),
+                      title: Text(region.name, overflow: TextOverflow.ellipsis),
+                      subtitle: const Text(
+                        'OpenStreetMap extract',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: FilledButton.icon(
+                        onPressed: _loading
+                            ? null
+                            : () => _downloadGeofabrik(region),
+                        icon: const Icon(Icons.download),
+                        label: const Text('Download'),
+                      ),
+                    ),
+                  ),
           ],
         ),
       ),

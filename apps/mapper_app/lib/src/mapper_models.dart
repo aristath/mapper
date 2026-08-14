@@ -281,6 +281,20 @@ class RegistryPack {
   final Features features;
 }
 
+class GeofabrikRegion {
+  const GeofabrikRegion({
+    required this.id,
+    required this.name,
+    required this.pbfUrl,
+    required this.bbox,
+  });
+
+  final String id;
+  final String name;
+  final String pbfUrl;
+  final List<double> bbox;
+}
+
 T? _optionalObject<T>(
   Object? value,
   T Function(Map<String, Object?> json) decode,

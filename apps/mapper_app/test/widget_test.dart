@@ -88,6 +88,20 @@ class _FakeMapperPackClient implements MapperPackClient {
   }
 
   @override
+  Future<List<GeofabrikRegion>> downloadableRegionsCoveringViewport({
+    required MapViewport viewport,
+  }) async {
+    return const [];
+  }
+
+  @override
+  Future<void> installGeofabrikRegion({
+    required GeofabrikRegion region,
+    required String storePath,
+    required String cachePath,
+  }) async {}
+
+  @override
   Future<void> installBundle({
     required String archivePath,
     required String storePath,
