@@ -12,6 +12,11 @@ abstract class MapperPackClient {
     required String storePath,
   });
 
+  Future<List<RegistryPack>> registryPacksCoveringViewport({
+    required String registryPath,
+    required MapViewport viewport,
+  });
+
   Future<void> installBundle({
     required String archivePath,
     required String storePath,
@@ -93,6 +98,26 @@ class ProcessMapperPackClient implements MapperPackClient {
       storePath,
     ]);
     return RegistryStatus.decode(result);
+  }
+
+  @override
+  Future<List<RegistryPack>> registryPacksCoveringViewport({
+    required String registryPath,
+    required MapViewport viewport,
+  }) async {
+    final result = await _run([
+      'run',
+      '-q',
+      '-p',
+      'mapper-pack',
+      '--',
+      'registry-covering-bbox',
+      '--registry',
+      registryPath,
+      '--bbox',
+      viewport.bboxArgument,
+    ]);
+    return RegistryPack.decodeList(result);
   }
 
   @override

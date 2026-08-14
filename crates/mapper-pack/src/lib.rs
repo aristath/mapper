@@ -595,6 +595,22 @@ pub fn registry_covering_packs(
     Ok(packs)
 }
 
+pub fn registry_covering_bbox_packs(
+    registry_path: &Path,
+    bbox: [f64; 4],
+) -> Result<Vec<RegistryPack>, PackError> {
+    validate_bbox(bbox)?;
+    let registry = read_registry(registry_path)?;
+    let mut packs: Vec<RegistryPack> = registry
+        .packs
+        .into_iter()
+        .filter(|pack| bbox_contains_bbox(pack.bbox, bbox))
+        .collect();
+
+    sort_registry_packs_by_area(&mut packs);
+    Ok(packs)
+}
+
 pub fn registry_route_packs(
     registry_path: &Path,
     from_lon: f64,
@@ -1487,6 +1503,10 @@ fn validate_lon_lat(lon: f64, lat: f64) -> Result<(), PackError> {
 fn bbox_contains(bbox: [f64; 4], lon: f64, lat: f64) -> bool {
     let [min_lon, min_lat, max_lon, max_lat] = bbox;
     (min_lon..=max_lon).contains(&lon) && (min_lat..=max_lat).contains(&lat)
+}
+
+fn bbox_contains_bbox(outer: [f64; 4], inner: [f64; 4]) -> bool {
+    outer[0] <= inner[0] && outer[1] <= inner[1] && outer[2] >= inner[2] && outer[3] >= inner[3]
 }
 
 fn bbox_area(bbox: [f64; 4]) -> f64 {
@@ -2508,6 +2528,26 @@ mod tests {
                 .map(|pack| pack.id.as_str())
                 .collect::<Vec<_>>(),
             vec!["small-region", "large-region"]
+        );
+
+        let covering_bbox = registry_covering_bbox_packs(&registry_path, [1.5, 1.5, 2.5, 2.5])
+            .expect("bbox coverage should resolve");
+        assert_eq!(
+            covering_bbox
+                .iter()
+                .map(|pack| pack.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["small-region", "large-region"]
+        );
+
+        let wide_bbox = registry_covering_bbox_packs(&registry_path, [1.5, 1.5, 4.0, 4.0])
+            .expect("wide bbox coverage should resolve");
+        assert_eq!(
+            wide_bbox
+                .iter()
+                .map(|pack| pack.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["large-region"]
         );
 
         let walking = registry_route_packs(&registry_path, 1.5, 1.5, 2.5, 2.5, "walking")

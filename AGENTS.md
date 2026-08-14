@@ -5,8 +5,10 @@ Work must meaningfully move that product forward.
 
 ## Priorities
 
-- Prefer concrete implementation, prototypes, tests, and usable artifacts over
-  ritualistic process.
+- Prefer concrete implementation, tests, and usable artifacts over ritualistic
+  process.
+- Do not frame work as a POC, MVP, v0, v1, or minimum viable product. Build the
+  actual app behavior the product needs.
 - Do not add corporate scaffolding, status theater, templates, dashboards,
   observability layers, or process documents unless they directly unblock or
   improve the app.
@@ -16,7 +18,7 @@ Work must meaningfully move that product forward.
   navigation experience.
 - Do not reinvent infrastructure that mature open-source map projects already
   provide.
-- When choosing work, favor the shortest path to a working vertical slice.
+- When choosing work, favor complete product behavior over demos and scaffolds.
 
 ## Engineering Direction
 
@@ -38,4 +40,3 @@ Work must meaningfully move that product forward.
 - Keep updates brief and practical.
 - Avoid bureaucratic language.
 - Preserve the literal scope the user requested.
-

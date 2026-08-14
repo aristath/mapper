@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:file_selector/file_selector.dart';
 
 import 'src/map_surface.dart';
 import 'src/mapper_models.dart';
@@ -13,10 +14,14 @@ class MapperApp extends StatelessWidget {
     super.key,
     required this.client,
     this.storePath = 'target/installed-packs',
+    this.catalogPath = 'target/map-catalog/registry.json',
+    this.onlineTilesEnabled = true,
   });
 
   final MapperPackClient client;
   final String storePath;
+  final String catalogPath;
+  final bool onlineTilesEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -30,16 +35,29 @@ class MapperApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: MapperHome(client: client, storePath: storePath),
+      home: MapperHome(
+        client: client,
+        storePath: storePath,
+        catalogPath: catalogPath,
+        onlineTilesEnabled: onlineTilesEnabled,
+      ),
     );
   }
 }
 
 class MapperHome extends StatefulWidget {
-  const MapperHome({super.key, required this.client, required this.storePath});
+  const MapperHome({
+    super.key,
+    required this.client,
+    required this.storePath,
+    required this.catalogPath,
+    required this.onlineTilesEnabled,
+  });
 
   final MapperPackClient client;
   final String storePath;
+  final String catalogPath;
+  final bool onlineTilesEnabled;
 
   @override
   State<MapperHome> createState() => _MapperHomeState();
@@ -47,6 +65,7 @@ class MapperHome extends StatefulWidget {
 
 class _MapperHomeState extends State<MapperHome> {
   StoreSnapshot? _snapshot;
+  MapViewport? _viewport;
   Object? _error;
   bool _loading = true;
 
@@ -113,7 +132,35 @@ class _MapperHomeState extends State<MapperHome> {
         return MapsManagerSheet(
           client: widget.client,
           storePath: widget.storePath,
+          catalogPath: widget.catalogPath,
           cachePath: 'target/map-cache',
+          onStoreChanged: _refresh,
+        );
+      },
+    );
+    await _refresh();
+  }
+
+  Future<void> _downloadVisibleArea() async {
+    final viewport = _viewport;
+    if (viewport == null) {
+      setState(() => _error = 'Move the map once, then download this area.');
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) {
+        return DownloadAreaSheet(
+          client: widget.client,
+          storePath: widget.storePath,
+          catalogPath: widget.catalogPath,
+          cachePath: 'target/map-cache',
+          viewport: viewport,
+          installedPackIds: (_snapshot?.installed ?? const <InstalledPack>[])
+              .map((pack) => pack.id)
+              .toSet(),
           onStoreChanged: _refresh,
         );
       },
@@ -128,7 +175,13 @@ class _MapperHomeState extends State<MapperHome> {
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(child: MapSurface(runtime: activeRuntime)),
+          Positioned.fill(
+            child: MapSurface(
+              runtime: activeRuntime,
+              onlineTilesEnabled: widget.onlineTilesEnabled,
+              onViewportChanged: (viewport) => _viewport = viewport,
+            ),
+          ),
           SafeArea(
             child: Stack(
               children: [
@@ -157,6 +210,7 @@ class _MapperHomeState extends State<MapperHome> {
                     storePath: widget.storePath,
                     onSelectPack: _setActive,
                     onOpenMaps: _openMapsManager,
+                    onDownloadArea: _downloadVisibleArea,
                   ),
                 ),
               ],
@@ -289,6 +343,7 @@ class _NavigationSheet extends StatelessWidget {
     required this.storePath,
     required this.onSelectPack,
     required this.onOpenMaps,
+    required this.onDownloadArea,
   });
 
   final StoreSnapshot? snapshot;
@@ -296,6 +351,7 @@ class _NavigationSheet extends StatelessWidget {
   final String storePath;
   final ValueChanged<InstalledPack> onSelectPack;
   final VoidCallback onOpenMaps;
+  final VoidCallback onDownloadArea;
 
   @override
   Widget build(BuildContext context) {
@@ -354,9 +410,9 @@ class _NavigationSheet extends StatelessWidget {
                     const SizedBox(width: 10),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: runtime == null ? null : () {},
-                        icon: const Icon(Icons.bookmark_border),
-                        label: const Text('Save'),
+                        onPressed: onDownloadArea,
+                        icon: const Icon(Icons.download_for_offline_outlined),
+                        label: const Text('Download area'),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -416,12 +472,14 @@ class MapsManagerSheet extends StatefulWidget {
     super.key,
     required this.client,
     required this.storePath,
+    required this.catalogPath,
     required this.cachePath,
     required this.onStoreChanged,
   });
 
   final MapperPackClient client;
   final String storePath;
+  final String catalogPath;
   final String cachePath;
   final Future<void> Function() onStoreChanged;
 
@@ -430,42 +488,37 @@ class MapsManagerSheet extends StatefulWidget {
 }
 
 class _MapsManagerSheetState extends State<MapsManagerSheet> {
-  final TextEditingController _registryController = TextEditingController();
-  final TextEditingController _bundleController = TextEditingController();
   RegistryStatus? _status;
   Object? _error;
   bool _loading = false;
 
   @override
-  void dispose() {
-    _registryController.dispose();
-    _bundleController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _loadCatalog();
   }
 
-  Future<void> _loadRegistry() async {
-    final registryPath = _registryController.text.trim();
-    if (registryPath.isEmpty) {
-      setState(() => _error = 'Enter a registry JSON path.');
-      return;
-    }
+  Future<void> _loadCatalog() async {
     await _run(() async {
       _status = await widget.client.registryStatus(
-        registryPath: registryPath,
+        registryPath: widget.catalogPath,
         storePath: widget.storePath,
       );
     });
   }
 
   Future<void> _installBundle() async {
-    final archivePath = _bundleController.text.trim();
-    if (archivePath.isEmpty) {
-      setState(() => _error = 'Enter a .mapperpack.tar archive path.');
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'Mapper packs', extensions: ['tar']),
+      ],
+    );
+    if (file == null) {
       return;
     }
     await _run(() async {
       await widget.client.installBundle(
-        archivePath: archivePath,
+        archivePath: file.path,
         storePath: widget.storePath,
       );
       await widget.onStoreChanged();
@@ -473,18 +526,17 @@ class _MapsManagerSheetState extends State<MapsManagerSheet> {
   }
 
   Future<void> _installFromRegistry(RegistryPackStatus pack) async {
-    final registryPath = _registryController.text.trim();
     await _run(() async {
       if (pack.installed && pack.updateAvailable) {
         await widget.client.updatePackFromRegistry(
-          registryPath: registryPath,
+          registryPath: widget.catalogPath,
           id: pack.id,
           cachePath: widget.cachePath,
           storePath: widget.storePath,
         );
       } else if (!pack.installed) {
         await widget.client.installPackFromRegistry(
-          registryPath: registryPath,
+          registryPath: widget.catalogPath,
           id: pack.id,
           cachePath: widget.cachePath,
           storePath: widget.storePath,
@@ -496,7 +548,7 @@ class _MapsManagerSheetState extends State<MapsManagerSheet> {
       );
       await widget.onStoreChanged();
       _status = await widget.client.registryStatus(
-        registryPath: registryPath,
+        registryPath: widget.catalogPath,
         storePath: widget.storePath,
       );
     });
@@ -542,7 +594,7 @@ class _MapsManagerSheetState extends State<MapsManagerSheet> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Install maps',
+                      'Offline maps',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
@@ -561,42 +613,29 @@ class _MapsManagerSheetState extends State<MapsManagerSheet> {
                 ],
               ),
               const SizedBox(height: 14),
-              TextField(
-                controller: _registryController,
-                decoration: InputDecoration(
-                  labelText: 'Registry JSON',
-                  prefixIcon: const Icon(Icons.list_alt),
-                  suffixIcon: IconButton(
-                    tooltip: 'Load registry',
-                    onPressed: _loading ? null : _loadRegistry,
-                    icon: const Icon(Icons.refresh),
-                  ),
-                  border: const OutlineInputBorder(),
-                ),
-                onSubmitted: (_) => _loading ? null : _loadRegistry(),
-              ),
-              const SizedBox(height: 12),
-              if (_status != null)
+              if (_status == null && _error == null)
+                const _SheetMessage(
+                  icon: Icons.map_outlined,
+                  title: 'Loading map catalog',
+                  body: 'Looking for downloadable offline maps.',
+                )
+              else if (_status != null)
                 _RegistryPackList(
                   status: _status!,
                   loading: _loading,
                   onInstall: _installFromRegistry,
+                )
+              else
+                _SheetMessage(
+                  icon: Icons.cloud_off_outlined,
+                  title: 'No map catalog available',
+                  body: 'You can still import a Mapper pack from a downloaded file.',
                 ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _bundleController,
-                decoration: const InputDecoration(
-                  labelText: 'Local .mapperpack.tar',
-                  prefixIcon: Icon(Icons.inventory_2_outlined),
-                  border: OutlineInputBorder(),
-                ),
-                onSubmitted: (_) => _loading ? null : _installBundle(),
-              ),
-              const SizedBox(height: 10),
-              FilledButton.icon(
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
                 onPressed: _loading ? null : _installBundle,
-                icon: const Icon(Icons.archive_outlined),
-                label: const Text('Install bundle'),
+                icon: const Icon(Icons.file_open_outlined),
+                label: const Text('Import map file'),
               ),
               if (_error != null) ...[
                 const SizedBox(height: 12),
@@ -608,6 +647,189 @@ class _MapsManagerSheetState extends State<MapsManagerSheet> {
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class DownloadAreaSheet extends StatefulWidget {
+  const DownloadAreaSheet({
+    super.key,
+    required this.client,
+    required this.storePath,
+    required this.catalogPath,
+    required this.cachePath,
+    required this.viewport,
+    required this.installedPackIds,
+    required this.onStoreChanged,
+  });
+
+  final MapperPackClient client;
+  final String storePath;
+  final String catalogPath;
+  final String cachePath;
+  final MapViewport viewport;
+  final Set<String> installedPackIds;
+  final Future<void> Function() onStoreChanged;
+
+  @override
+  State<DownloadAreaSheet> createState() => _DownloadAreaSheetState();
+}
+
+class _DownloadAreaSheetState extends State<DownloadAreaSheet> {
+  List<RegistryPack>? _packs;
+  Object? _error;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final packs = await widget.client.registryPacksCoveringViewport(
+        registryPath: widget.catalogPath,
+        viewport: widget.viewport,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _packs = packs;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _download(RegistryPack pack) async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      if (!widget.installedPackIds.contains(pack.id)) {
+        await widget.client.installPackFromRegistry(
+          registryPath: widget.catalogPath,
+          id: pack.id,
+          cachePath: widget.cachePath,
+          storePath: widget.storePath,
+        );
+      }
+      await widget.client.setActivePack(
+        storePath: widget.storePath,
+        id: pack.id,
+      );
+      await widget.onStoreChanged();
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final packs = _packs ?? const <RegistryPack>[];
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 16, 16, bottom + 16),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.download_for_offline_outlined),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Download this area',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                if (_loading)
+                  const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            if (_loading && _packs == null)
+              const _SheetMessage(
+                icon: Icons.search,
+                title: 'Finding offline maps',
+                body: 'Looking for a downloadable map that covers the screen.',
+              )
+            else if (_error != null)
+              _SheetMessage(
+                icon: Icons.cloud_off_outlined,
+                title: 'No catalog available',
+                body: 'The app can show the online map, but it needs a map catalog before it can download this area.',
+              )
+            else if (packs.isEmpty)
+              const _SheetMessage(
+                icon: Icons.travel_explore,
+                title: 'No offline map covers this view',
+                body: 'Zoom in or move to an area available in the catalog.',
+              )
+            else
+              ...packs.map(
+                (pack) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.map_outlined),
+                  title: Text(pack.name, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(
+                    '${pack.country}  ${_formatBytes(pack.bytes)}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: FilledButton.icon(
+                    onPressed: _loading ? null : () => _download(pack),
+                    icon: Icon(
+                      widget.installedPackIds.contains(pack.id)
+                          ? Icons.map
+                          : Icons.download,
+                    ),
+                    label: Text(
+                      widget.installedPackIds.contains(pack.id)
+                          ? 'Open'
+                          : 'Download',
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

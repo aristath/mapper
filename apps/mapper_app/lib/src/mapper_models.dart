@@ -1,5 +1,21 @@
 import 'dart:convert';
 
+class MapViewport {
+  const MapViewport({
+    required this.minLon,
+    required this.minLat,
+    required this.maxLon,
+    required this.maxLat,
+  });
+
+  final double minLon;
+  final double minLat;
+  final double maxLon;
+  final double maxLat;
+
+  String get bboxArgument => '$minLon,$minLat,$maxLon,$maxLat';
+}
+
 class Features {
   const Features({
     required this.rendering,
@@ -217,6 +233,51 @@ class RegistryPackStatus {
   final String country;
   final List<double> bbox;
   final int bytes;
+  final Features features;
+}
+
+class RegistryPack {
+  const RegistryPack({
+    required this.id,
+    required this.name,
+    required this.version,
+    required this.country,
+    required this.bbox,
+    required this.url,
+    required this.bytes,
+    required this.sha256,
+    required this.features,
+  });
+
+  factory RegistryPack.fromJson(Map<String, Object?> json) {
+    return RegistryPack(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      version: json['version'] as String,
+      country: json['country'] as String,
+      bbox: _bboxFromJson(json['bbox']),
+      url: json['url'] as String,
+      bytes: json['bytes'] as int,
+      sha256: json['sha256'] as String,
+      features: Features.fromJson(json['features'] as Map<String, Object?>),
+    );
+  }
+
+  static List<RegistryPack> decodeList(String source) {
+    return (jsonDecode(source) as List<Object?>)
+        .whereType<Map<String, Object?>>()
+        .map(RegistryPack.fromJson)
+        .toList(growable: false);
+  }
+
+  final String id;
+  final String name;
+  final String version;
+  final String country;
+  final List<double> bbox;
+  final String url;
+  final int bytes;
+  final String sha256;
   final Features features;
 }
 

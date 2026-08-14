@@ -4,11 +4,12 @@ use mapper_pack::{
     enable_feature, init_pack, inspect_pack, install_bundle, install_from_registry, install_pack,
     list_installed_packs, materialize_valhalla_runtime_config,
     materialize_valhalla_runtime_config_at, post_valhalla_route, read_registry,
-    registry_covering_packs, registry_route_packs, registry_status, required_toolchain,
-    resolve_asset_path, route_request, route_request_at, routing_packs, runtime_config,
-    set_active_pack, set_active_pack_at, store_snapshot, unpack_bundle, update_from_registry,
-    AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions, InstallFromRegistryOptions,
-    InstallOptions, RegistryAddOptions, UninstallOptions, UnpackOptions,
+    registry_covering_bbox_packs, registry_covering_packs, registry_route_packs, registry_status,
+    required_toolchain, resolve_asset_path, route_request, route_request_at, routing_packs,
+    runtime_config, set_active_pack, set_active_pack_at, store_snapshot, unpack_bundle,
+    update_from_registry, AddFileOptions, BundleOptions, InitOptions, InstallBundleOptions,
+    InstallFromRegistryOptions, InstallOptions, RegistryAddOptions, UninstallOptions,
+    UnpackOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -113,6 +114,12 @@ fn main() {
         "registry-covering" => parse_registry_lon_lat(args.collect(), "registry-covering")
             .and_then(|(registry, lon, lat)| {
                 let packs = registry_covering_packs(&registry, lon, lat)?;
+                println!("{}", serde_json::to_string_pretty(&packs)?);
+                Ok(())
+            }),
+        "registry-covering-bbox" => parse_registry_bbox(args.collect(), "registry-covering-bbox")
+            .and_then(|(registry, bbox)| {
+                let packs = registry_covering_bbox_packs(&registry, bbox)?;
                 println!("{}", serde_json::to_string_pretty(&packs)?);
                 Ok(())
             }),
@@ -827,6 +834,35 @@ fn parse_registry_lon_lat(
     ))
 }
 
+fn parse_registry_bbox(
+    args: Vec<String>,
+    command: &str,
+) -> Result<(PathBuf, [f64; 4]), mapper_pack::PackError> {
+    let mut registry = None;
+    let mut bbox = None;
+
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(mapper_pack::PackError::Invalid(format!(
+                "missing value for {flag}"
+            )));
+        };
+
+        match flag.as_str() {
+            "--registry" => registry = Some(PathBuf::from(value)),
+            "--bbox" => bbox = Some(parse_bbox(&value)?),
+            _ => {
+                return Err(mapper_pack::PackError::Invalid(format!(
+                    "unknown {command} option: {flag}"
+                )));
+            }
+        }
+    }
+
+    Ok((required(registry, "--registry")?, required(bbox, "--bbox")?))
+}
+
 struct RegistryRouteArgs {
     registry: PathBuf,
     from_lon: f64,
@@ -1317,6 +1353,7 @@ fn print_help() {
     println!("  mapper-pack registry-add --registry <registry.json> --pack <dir> --archive <file.mapperpack.tar> --url <url> --generated-at <iso-date>");
     println!("  mapper-pack registry-status --registry <registry.json> --store <dir>");
     println!("  mapper-pack registry-covering --registry <registry.json> --lon <lon> --lat <lat>");
+    println!("  mapper-pack registry-covering-bbox --registry <registry.json> --bbox <min_lon,min_lat,max_lon,max_lat>");
     println!("  mapper-pack registry-route-pack --registry <registry.json> --from-lon <lon> --from-lat <lat> --to-lon <lon> --to-lat <lat> --mode <mode>");
     println!("  mapper-pack install-from-registry --registry <registry.json> --id <id> --cache <dir> --store <dir>");
     println!("  mapper-pack update-from-registry --registry <registry.json> --id <id> --cache <dir> --store <dir>");

@@ -7,19 +7,35 @@ import 'package:vector_tile_renderer/vector_tile_renderer.dart' as renderer;
 
 import 'mapper_models.dart';
 
+typedef ViewportChanged = void Function(MapViewport viewport);
+
 class MapSurface extends StatelessWidget {
-  const MapSurface({super.key, required this.runtime});
+  const MapSurface({
+    super.key,
+    required this.runtime,
+    required this.onlineTilesEnabled,
+    required this.onViewportChanged,
+  });
 
   final RuntimeConfig? runtime;
+  final bool onlineTilesEnabled;
+  final ViewportChanged onViewportChanged;
 
   @override
   Widget build(BuildContext context) {
     final vectorTiles = runtime?.assets.vectorTiles;
     if (runtime != null && vectorTiles != null) {
-      return LocalPmTilesMap(runtime: runtime!, vectorTiles: vectorTiles);
+      return LocalPmTilesMap(
+        runtime: runtime!,
+        vectorTiles: vectorTiles,
+        onViewportChanged: onViewportChanged,
+      );
     }
 
-    return const PixelCityFallback();
+    return OnlineFallbackMap(
+      onlineTilesEnabled: onlineTilesEnabled,
+      onViewportChanged: onViewportChanged,
+    );
   }
 }
 
@@ -28,16 +44,19 @@ class LocalPmTilesMap extends StatefulWidget {
     super.key,
     required this.runtime,
     required this.vectorTiles,
+    required this.onViewportChanged,
   });
 
   final RuntimeConfig runtime;
   final String vectorTiles;
+  final ViewportChanged onViewportChanged;
 
   @override
   State<LocalPmTilesMap> createState() => _LocalPmTilesMapState();
 }
 
 class _LocalPmTilesMapState extends State<LocalPmTilesMap> {
+  final MapController _controller = MapController();
   late Future<PmTilesVectorTileProvider> _provider;
 
   @override
@@ -82,12 +101,15 @@ class _LocalPmTilesMapState extends State<LocalPmTilesMap> {
             fit: StackFit.expand,
             children: [
               FlutterMap(
+                mapController: _controller,
                 options: MapOptions(
                   initialCenter: _bboxCenter(widget.runtime.bbox),
                   initialZoom: _initialZoom(widget.runtime.bbox),
                   minZoom: provider.minimumZoom.toDouble(),
                   maxZoom: provider.maximumZoom.toDouble().clamp(4, 22),
                   backgroundColor: const Color(0xffd7dfca),
+                  onMapReady: () => _notifyViewport(_controller.camera),
+                  onPositionChanged: (camera, _) => _notifyViewport(camera),
                 ),
                 children: [
                   VectorTileLayer(
@@ -106,10 +128,28 @@ class _LocalPmTilesMapState extends State<LocalPmTilesMap> {
       },
     );
   }
+
+  void _notifyViewport(MapCamera camera) {
+    widget.onViewportChanged(_viewportFromBounds(camera.visibleBounds));
+  }
 }
 
-class PixelCityFallback extends StatelessWidget {
-  const PixelCityFallback({super.key});
+class OnlineFallbackMap extends StatefulWidget {
+  const OnlineFallbackMap({
+    super.key,
+    required this.onlineTilesEnabled,
+    required this.onViewportChanged,
+  });
+
+  final bool onlineTilesEnabled;
+  final ViewportChanged onViewportChanged;
+
+  @override
+  State<OnlineFallbackMap> createState() => _OnlineFallbackMapState();
+}
+
+class _OnlineFallbackMapState extends State<OnlineFallbackMap> {
+  final MapController _controller = MapController();
 
   @override
   Widget build(BuildContext context) {
@@ -121,12 +161,35 @@ class PixelCityFallback extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          const CustomPaint(painter: EmptyMapPainter()),
-          Center(
+          FlutterMap(
+            mapController: _controller,
+            options: MapOptions(
+              initialCenter: const LatLng(39.0, 22.0),
+              initialZoom: 6,
+              minZoom: 2,
+              maxZoom: 19,
+              backgroundColor: const Color(0xffd8d4ca),
+              onMapReady: () => _notifyViewport(_controller.camera),
+              onPositionChanged: (camera, _) => _notifyViewport(camera),
+            ),
+            children: widget.onlineTilesEnabled
+                ? [
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'app.mapper.mapper',
+                      maxZoom: 19,
+                    ),
+                  ]
+                : const [],
+          ),
+          Positioned(
+            left: 16,
+            bottom: 132,
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: const Color(0xfffbf8ef),
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: const Color(0x332b2f33)),
                 boxShadow: const [
                   BoxShadow(
@@ -138,20 +201,18 @@ class PixelCityFallback extends StatelessWidget {
               ),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 18,
+                  horizontal: 14,
+                  vertical: 12,
                 ),
-                child: Column(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(Icons.download_for_offline_outlined, size: 34),
-                    const SizedBox(height: 8),
+                    const SizedBox(width: 10),
                     Text(
-                      'No offline map opened',
-                      style: Theme.of(context).textTheme.titleLarge,
+                      'Online map',
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
-                    const SizedBox(height: 4),
-                    const Text('Install or select a city pack.'),
                   ],
                 ),
               ),
@@ -160,6 +221,10 @@ class PixelCityFallback extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  void _notifyViewport(MapCamera camera) {
+    widget.onViewportChanged(_viewportFromBounds(camera.visibleBounds));
   }
 }
 
@@ -236,36 +301,21 @@ class _MapBadge extends StatelessWidget {
   }
 }
 
-class EmptyMapPainter extends CustomPainter {
-  const EmptyMapPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final background = Paint()..color = const Color(0xffd8d4ca);
-    canvas.drawRect(Offset.zero & size, background);
-
-    final grid = Paint()
-      ..color = const Color(0x202b2f33)
-      ..strokeWidth = 1;
-    const step = 44.0;
-    for (double x = 0; x < size.width; x += step) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
-    }
-    for (double y = 0; y < size.height; y += step) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
-    }
-  }
-
-  @override
-  bool shouldRepaint(EmptyMapPainter oldDelegate) => false;
-}
-
 LatLng _bboxCenter(List<double> bbox) {
   final minLon = bbox[0];
   final minLat = bbox[1];
   final maxLon = bbox[2];
   final maxLat = bbox[3];
   return LatLng((minLat + maxLat) / 2, (minLon + maxLon) / 2);
+}
+
+MapViewport _viewportFromBounds(LatLngBounds bounds) {
+  return MapViewport(
+    minLon: bounds.west.clamp(-180.0, 180.0),
+    minLat: bounds.south.clamp(-90.0, 90.0),
+    maxLon: bounds.east.clamp(-180.0, 180.0),
+    maxLat: bounds.north.clamp(-90.0, 90.0),
+  );
 }
 
 double _initialZoom(List<double> bbox) {

@@ -39,6 +39,7 @@ dependencies:
   vector_map_tiles_pmtiles: ^1.5.0
   latlong2: ^0.9.1
   vector_tile_renderer: ^5.2.1
+  file_selector: ^1.1.0
 
 dev_dependencies:
   flutter_test:

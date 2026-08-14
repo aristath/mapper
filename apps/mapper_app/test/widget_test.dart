@@ -9,18 +9,20 @@ void main() {
       MapperApp(
         client: _FakeMapperPackClient(),
         storePath: 'target/test-store',
+        onlineTilesEnabled: false,
       ),
     );
     await tester.pump();
     await tester.pump();
 
     expect(find.text('Search offline maps'), findsOneWidget);
-    expect(find.text('No offline map opened'), findsWidgets);
+    expect(find.text('Online map'), findsOneWidget);
     expect(
       find.text('Choose one of your installed packs to open the map.'),
       findsOneWidget,
     );
     expect(find.text('Directions'), findsOneWidget);
+    expect(find.text('Download area'), findsOneWidget);
     expect(find.text('Maps'), findsOneWidget);
     expect(find.text('Test Region'), findsOneWidget);
     expect(find.text('target/test-store'), findsOneWidget);
@@ -30,9 +32,9 @@ void main() {
     await tester.tap(find.text('Maps'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Install maps'), findsOneWidget);
-    expect(find.text('Registry JSON'), findsOneWidget);
-    expect(find.text('Local .mapperpack.tar'), findsOneWidget);
+    expect(find.text('Offline maps'), findsOneWidget);
+    expect(find.text('No packs in registry'), findsOneWidget);
+    expect(find.text('Import map file'), findsOneWidget);
   });
 }
 
@@ -75,6 +77,14 @@ class _FakeMapperPackClient implements MapperPackClient {
     required String storePath,
   }) async {
     return const RegistryStatus(registryGeneratedAt: '2026-08-14', packs: []);
+  }
+
+  @override
+  Future<List<RegistryPack>> registryPacksCoveringViewport({
+    required String registryPath,
+    required MapViewport viewport,
+  }) async {
+    return const [];
   }
 
   @override
