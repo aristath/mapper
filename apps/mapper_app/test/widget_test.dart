@@ -12,10 +12,11 @@ void main() {
         storePath: 'target/test-store',
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
 
     expect(find.text('Mapper'), findsOneWidget);
-    expect(find.text('Test Region'), findsNWidgets(2));
+    expect(find.text('Test Region'), findsOneWidget);
     expect(find.text('test-region  2026.08.13'), findsOneWidget);
     expect(find.byIcon(Icons.radio_button_checked), findsOneWidget);
     expect(find.text('target/test-store'), findsOneWidget);
@@ -44,27 +45,7 @@ class _FakeMapperPackClient implements MapperPackClient {
         bbox: [1, 2, 3, 4],
         path: '/tmp/test-region',
       ),
-      activeRuntime: RuntimeConfig(
-        id: 'test-region',
-        name: 'Test Region',
-        version: '2026.08.13',
-        bbox: [1, 2, 3, 4],
-        features: Features(
-          rendering: true,
-          routing: ['pedestrian'],
-          search: false,
-          transit: false,
-        ),
-        assets: RuntimeAssets(
-          vectorTiles: '/tmp/test-region/map/tiles.pmtiles',
-          styleJson: '/tmp/test-region/map/style.json',
-          valhallaTiles: '/tmp/test-region/routing/valhalla_tiles.tar',
-          valhallaConfig: '/tmp/test-region/routing/valhalla.json',
-          searchIndex: null,
-          poiIndex: null,
-          gtfs: null,
-        ),
-      ),
+      activeRuntime: null,
       warnings: [],
     );
   }

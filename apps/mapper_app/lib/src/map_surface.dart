@@ -1,4 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:vector_map_tiles/vector_map_tiles.dart';
+import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
+import 'package:vector_tile_renderer/vector_tile_renderer.dart' as renderer;
 
 import 'mapper_models.dart';
 
@@ -6,6 +11,105 @@ class MapSurface extends StatelessWidget {
   const MapSurface({super.key, required this.runtime});
 
   final RuntimeConfig? runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    final vectorTiles = runtime?.assets.vectorTiles;
+    if (runtime != null && vectorTiles != null) {
+      return LocalPmTilesMap(runtime: runtime!, vectorTiles: vectorTiles);
+    }
+
+    return const PixelCityFallback();
+  }
+}
+
+class LocalPmTilesMap extends StatefulWidget {
+  const LocalPmTilesMap({
+    super.key,
+    required this.runtime,
+    required this.vectorTiles,
+  });
+
+  final RuntimeConfig runtime;
+  final String vectorTiles;
+
+  @override
+  State<LocalPmTilesMap> createState() => _LocalPmTilesMapState();
+}
+
+class _LocalPmTilesMapState extends State<LocalPmTilesMap> {
+  late Future<PmTilesVectorTileProvider> _provider;
+
+  @override
+  void initState() {
+    super.initState();
+    _provider = PmTilesVectorTileProvider.fromSource(widget.vectorTiles);
+  }
+
+  @override
+  void didUpdateWidget(LocalPmTilesMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.vectorTiles != widget.vectorTiles) {
+      _provider = PmTilesVectorTileProvider.fromSource(widget.vectorTiles);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<PmTilesVectorTileProvider>(
+      future: _provider,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return MapErrorPanel(
+            runtime: widget.runtime,
+            message: snapshot.error.toString(),
+          );
+        }
+        if (!snapshot.hasData) {
+          return const DecoratedBox(
+            decoration: BoxDecoration(color: Color(0xffe8e5dc)),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final provider = snapshot.data!;
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: const Color(0xffe8e5dc),
+            border: Border.all(color: const Color(0xff2b2f33), width: 2),
+          ),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              FlutterMap(
+                options: MapOptions(
+                  initialCenter: _bboxCenter(widget.runtime.bbox),
+                  initialZoom: _initialZoom(widget.runtime.bbox),
+                  minZoom: provider.minimumZoom.toDouble(),
+                  maxZoom: provider.maximumZoom.toDouble().clamp(4, 22),
+                  backgroundColor: const Color(0xffd7dfca),
+                ),
+                children: [
+                  VectorTileLayer(
+                    tileProviders: TileProviders({'openmaptiles': provider}),
+                    theme: renderer.ProvidedThemes.lightTheme(),
+                    layerMode: VectorTileLayerMode.vector,
+                    maximumZoom: provider.maximumZoom.toDouble(),
+                    fileCacheTtl: Duration.zero,
+                  ),
+                ],
+              ),
+              _MapBadge(runtime: widget.runtime),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class PixelCityFallback extends StatelessWidget {
+  const PixelCityFallback({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -18,7 +122,7 @@ class MapSurface extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          CustomPaint(painter: PixelCityPainter(active: runtime != null)),
+          const CustomPaint(painter: PixelCityPainter()),
           Positioned(
             left: 16,
             top: 16,
@@ -32,24 +136,10 @@ class MapSurface extends StatelessWidget {
                   horizontal: 12,
                   vertical: 10,
                 ),
-                child: runtime == null
-                    ? Text(
-                        'No active local pack',
-                        style: theme.textTheme.titleMedium,
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            runtime!.name,
-                            style: theme.textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(runtime!.id),
-                          Text('bbox ${runtime!.bbox.join(', ')}'),
-                        ],
-                      ),
+                child: Text(
+                  'No active local pack',
+                  style: theme.textTheme.titleMedium,
+                ),
               ),
             ),
           ),
@@ -59,15 +149,85 @@ class MapSurface extends StatelessWidget {
   }
 }
 
-class PixelCityPainter extends CustomPainter {
-  const PixelCityPainter({required this.active});
+class MapErrorPanel extends StatelessWidget {
+  const MapErrorPanel({
+    super.key,
+    required this.runtime,
+    required this.message,
+  });
 
-  final bool active;
+  final RuntimeConfig runtime;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xfff8f5eb),
+        border: Border.all(color: const Color(0xff2b2f33), width: 2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Map failed to load',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 10),
+            Text(runtime.name),
+            const SizedBox(height: 10),
+            SelectableText(message),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MapBadge extends StatelessWidget {
+  const _MapBadge({required this.runtime});
+
+  final RuntimeConfig runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: 16,
+      top: 16,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xfff8f5eb),
+          border: Border.all(color: const Color(0xff2b2f33)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                runtime.name,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              Text(runtime.id),
+              Text('bbox ${runtime.bbox.join(', ')}'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class PixelCityPainter extends CustomPainter {
+  const PixelCityPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
-    final background = Paint()
-      ..color = active ? const Color(0xffd7dfca) : const Color(0xffd9d6cf);
+    final background = Paint()..color = const Color(0xffd9d6cf);
     canvas.drawRect(Offset.zero & size, background);
 
     final grid = Paint()
@@ -128,7 +288,29 @@ class PixelCityPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(PixelCityPainter oldDelegate) {
-    return oldDelegate.active != active;
+  bool shouldRepaint(PixelCityPainter oldDelegate) => false;
+}
+
+LatLng _bboxCenter(List<double> bbox) {
+  final minLon = bbox[0];
+  final minLat = bbox[1];
+  final maxLon = bbox[2];
+  final maxLat = bbox[3];
+  return LatLng((minLat + maxLat) / 2, (minLon + maxLon) / 2);
+}
+
+double _initialZoom(List<double> bbox) {
+  final lonSpan = (bbox[2] - bbox[0]).abs();
+  final latSpan = (bbox[3] - bbox[1]).abs();
+  final span = lonSpan > latSpan ? lonSpan : latSpan;
+  if (span <= 0.05) {
+    return 14;
   }
+  if (span <= 0.2) {
+    return 12;
+  }
+  if (span <= 1.0) {
+    return 10;
+  }
+  return 7;
 }

@@ -1,6 +1,9 @@
 # mapper_app
 
-A new Flutter project.
+Mapper's Flutter app shell.
+
+On Linux, the map surface renders an active pack's local PMTiles file with
+`flutter_map`, `vector_map_tiles`, and `vector_map_tiles_pmtiles`.
 
 ## Getting Started
 

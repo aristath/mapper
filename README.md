@@ -72,7 +72,9 @@ flutter run -d linux
 ```
 
 The app reads the local pack store through `mapper-pack store-snapshot` and
-opens the active pack's runtime assets.
+opens the active pack's runtime assets. On Linux, the map surface reads the
+active pack's local PMTiles archive through `flutter_map`,
+`vector_map_tiles`, and `vector_map_tiles_pmtiles`.
 
 Download an OpenStreetMap extract:
 
