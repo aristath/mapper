@@ -6,6 +6,30 @@ abstract class MapperPackClient {
   Future<StoreSnapshot> storeSnapshot(String storePath);
 
   Future<void> setActivePack({required String storePath, required String id});
+
+  Future<RegistryStatus> registryStatus({
+    required String registryPath,
+    required String storePath,
+  });
+
+  Future<void> installBundle({
+    required String archivePath,
+    required String storePath,
+  });
+
+  Future<void> installPackFromRegistry({
+    required String registryPath,
+    required String id,
+    required String cachePath,
+    required String storePath,
+  });
+
+  Future<void> updatePackFromRegistry({
+    required String registryPath,
+    required String id,
+    required String cachePath,
+    required String storePath,
+  });
 }
 
 class ProcessMapperPackClient implements MapperPackClient {
@@ -48,6 +72,95 @@ class ProcessMapperPackClient implements MapperPackClient {
       storePath,
       '--id',
       id,
+    ]);
+  }
+
+  @override
+  Future<RegistryStatus> registryStatus({
+    required String registryPath,
+    required String storePath,
+  }) async {
+    final result = await _run([
+      'run',
+      '-q',
+      '-p',
+      'mapper-pack',
+      '--',
+      'registry-status',
+      '--registry',
+      registryPath,
+      '--store',
+      storePath,
+    ]);
+    return RegistryStatus.decode(result);
+  }
+
+  @override
+  Future<void> installBundle({
+    required String archivePath,
+    required String storePath,
+  }) async {
+    await _run([
+      'run',
+      '-q',
+      '-p',
+      'mapper-pack',
+      '--',
+      'install-bundle',
+      '--archive',
+      archivePath,
+      '--store',
+      storePath,
+    ]);
+  }
+
+  @override
+  Future<void> installPackFromRegistry({
+    required String registryPath,
+    required String id,
+    required String cachePath,
+    required String storePath,
+  }) async {
+    await _run([
+      'run',
+      '-q',
+      '-p',
+      'mapper-pack',
+      '--',
+      'install-from-registry',
+      '--registry',
+      registryPath,
+      '--id',
+      id,
+      '--cache',
+      cachePath,
+      '--store',
+      storePath,
+    ]);
+  }
+
+  @override
+  Future<void> updatePackFromRegistry({
+    required String registryPath,
+    required String id,
+    required String cachePath,
+    required String storePath,
+  }) async {
+    await _run([
+      'run',
+      '-q',
+      '-p',
+      'mapper-pack',
+      '--',
+      'update-from-registry',
+      '--registry',
+      registryPath,
+      '--id',
+      id,
+      '--cache',
+      cachePath,
+      '--store',
+      storePath,
     ]);
   }
 

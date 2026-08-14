@@ -26,6 +26,13 @@ void main() {
     expect(find.text('target/test-store'), findsOneWidget);
     expect(find.text('Runtime'), findsNothing);
     expect(find.text('Packs'), findsNothing);
+
+    await tester.tap(find.text('Maps'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Install maps'), findsOneWidget);
+    expect(find.text('Registry JSON'), findsOneWidget);
+    expect(find.text('Local .mapperpack.tar'), findsOneWidget);
   });
 }
 
@@ -60,5 +67,35 @@ class _FakeMapperPackClient implements MapperPackClient {
   Future<void> setActivePack({
     required String storePath,
     required String id,
+  }) async {}
+
+  @override
+  Future<RegistryStatus> registryStatus({
+    required String registryPath,
+    required String storePath,
+  }) async {
+    return const RegistryStatus(registryGeneratedAt: '2026-08-14', packs: []);
+  }
+
+  @override
+  Future<void> installBundle({
+    required String archivePath,
+    required String storePath,
+  }) async {}
+
+  @override
+  Future<void> installPackFromRegistry({
+    required String registryPath,
+    required String id,
+    required String cachePath,
+    required String storePath,
+  }) async {}
+
+  @override
+  Future<void> updatePackFromRegistry({
+    required String registryPath,
+    required String id,
+    required String cachePath,
+    required String storePath,
   }) async {}
 }

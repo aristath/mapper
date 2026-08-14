@@ -151,6 +151,75 @@ class StoreSnapshot {
   final List<String> warnings;
 }
 
+class RegistryStatus {
+  const RegistryStatus({
+    required this.registryGeneratedAt,
+    required this.packs,
+  });
+
+  factory RegistryStatus.fromJson(Map<String, Object?> json) {
+    final packsJson = json['packs'] as List<Object?>? ?? const [];
+    return RegistryStatus(
+      registryGeneratedAt: json['registry_generated_at'] as String,
+      packs: packsJson
+          .whereType<Map<String, Object?>>()
+          .map(RegistryPackStatus.fromJson)
+          .toList(growable: false),
+    );
+  }
+
+  factory RegistryStatus.decode(String source) {
+    return RegistryStatus.fromJson(jsonDecode(source) as Map<String, Object?>);
+  }
+
+  final String registryGeneratedAt;
+  final List<RegistryPackStatus> packs;
+}
+
+class RegistryPackStatus {
+  const RegistryPackStatus({
+    required this.id,
+    required this.name,
+    required this.registryVersion,
+    required this.installedVersion,
+    required this.installed,
+    required this.updateAvailable,
+    required this.active,
+    required this.country,
+    required this.bbox,
+    required this.bytes,
+    required this.features,
+  });
+
+  factory RegistryPackStatus.fromJson(Map<String, Object?> json) {
+    return RegistryPackStatus(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      registryVersion: json['registry_version'] as String,
+      installedVersion: json['installed_version'] as String?,
+      installed: json['installed'] == true,
+      updateAvailable: json['update_available'] == true,
+      active: json['active'] == true,
+      country: json['country'] as String,
+      bbox: _bboxFromJson(json['bbox']),
+      bytes: json['bytes'] as int,
+      features: Features.fromJson(json['features'] as Map<String, Object?>),
+    );
+  }
+
+  final String id;
+  final String name;
+  final String registryVersion;
+  final String? installedVersion;
+  final bool installed;
+  final bool updateAvailable;
+  final bool active;
+  final String country;
+  final List<double> bbox;
+  final int bytes;
+  final Features features;
+}
+
 T? _optionalObject<T>(
   Object? value,
   T Function(Map<String, Object?> json) decode,

@@ -104,6 +104,23 @@ class _MapperHomeState extends State<MapperHome> {
     }
   }
 
+  Future<void> _openMapsManager() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) {
+        return MapsManagerSheet(
+          client: widget.client,
+          storePath: widget.storePath,
+          cachePath: 'target/map-cache',
+          onStoreChanged: _refresh,
+        );
+      },
+    );
+    await _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     final snapshot = _snapshot;
@@ -139,6 +156,7 @@ class _MapperHomeState extends State<MapperHome> {
                     error: _error,
                     storePath: widget.storePath,
                     onSelectPack: _setActive,
+                    onOpenMaps: _openMapsManager,
                   ),
                 ),
               ],
@@ -270,12 +288,14 @@ class _NavigationSheet extends StatelessWidget {
     required this.error,
     required this.storePath,
     required this.onSelectPack,
+    required this.onOpenMaps,
   });
 
   final StoreSnapshot? snapshot;
   final Object? error;
   final String storePath;
   final ValueChanged<InstalledPack> onSelectPack;
+  final VoidCallback onOpenMaps;
 
   @override
   Widget build(BuildContext context) {
@@ -342,7 +362,7 @@ class _NavigationSheet extends StatelessWidget {
                     const SizedBox(width: 10),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: () {},
+                        onPressed: onOpenMaps,
                         icon: const Icon(Icons.download_outlined),
                         label: const Text('Maps'),
                       ),
@@ -389,6 +409,273 @@ class _NavigationSheet extends StatelessWidget {
       ),
     );
   }
+}
+
+class MapsManagerSheet extends StatefulWidget {
+  const MapsManagerSheet({
+    super.key,
+    required this.client,
+    required this.storePath,
+    required this.cachePath,
+    required this.onStoreChanged,
+  });
+
+  final MapperPackClient client;
+  final String storePath;
+  final String cachePath;
+  final Future<void> Function() onStoreChanged;
+
+  @override
+  State<MapsManagerSheet> createState() => _MapsManagerSheetState();
+}
+
+class _MapsManagerSheetState extends State<MapsManagerSheet> {
+  final TextEditingController _registryController = TextEditingController();
+  final TextEditingController _bundleController = TextEditingController();
+  RegistryStatus? _status;
+  Object? _error;
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _registryController.dispose();
+    _bundleController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadRegistry() async {
+    final registryPath = _registryController.text.trim();
+    if (registryPath.isEmpty) {
+      setState(() => _error = 'Enter a registry JSON path.');
+      return;
+    }
+    await _run(() async {
+      _status = await widget.client.registryStatus(
+        registryPath: registryPath,
+        storePath: widget.storePath,
+      );
+    });
+  }
+
+  Future<void> _installBundle() async {
+    final archivePath = _bundleController.text.trim();
+    if (archivePath.isEmpty) {
+      setState(() => _error = 'Enter a .mapperpack.tar archive path.');
+      return;
+    }
+    await _run(() async {
+      await widget.client.installBundle(
+        archivePath: archivePath,
+        storePath: widget.storePath,
+      );
+      await widget.onStoreChanged();
+    });
+  }
+
+  Future<void> _installFromRegistry(RegistryPackStatus pack) async {
+    final registryPath = _registryController.text.trim();
+    await _run(() async {
+      if (pack.installed && pack.updateAvailable) {
+        await widget.client.updatePackFromRegistry(
+          registryPath: registryPath,
+          id: pack.id,
+          cachePath: widget.cachePath,
+          storePath: widget.storePath,
+        );
+      } else if (!pack.installed) {
+        await widget.client.installPackFromRegistry(
+          registryPath: registryPath,
+          id: pack.id,
+          cachePath: widget.cachePath,
+          storePath: widget.storePath,
+        );
+      }
+      await widget.client.setActivePack(
+        storePath: widget.storePath,
+        id: pack.id,
+      );
+      await widget.onStoreChanged();
+      _status = await widget.client.registryStatus(
+        registryPath: registryPath,
+        storePath: widget.storePath,
+      );
+    });
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await action();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _loading = false);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 16, 16, bottom + 16),
+      child: SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.download_for_offline_outlined),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Install maps',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  if (_loading)
+                    const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _registryController,
+                decoration: InputDecoration(
+                  labelText: 'Registry JSON',
+                  prefixIcon: const Icon(Icons.list_alt),
+                  suffixIcon: IconButton(
+                    tooltip: 'Load registry',
+                    onPressed: _loading ? null : _loadRegistry,
+                    icon: const Icon(Icons.refresh),
+                  ),
+                  border: const OutlineInputBorder(),
+                ),
+                onSubmitted: (_) => _loading ? null : _loadRegistry(),
+              ),
+              const SizedBox(height: 12),
+              if (_status != null)
+                _RegistryPackList(
+                  status: _status!,
+                  loading: _loading,
+                  onInstall: _installFromRegistry,
+                ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _bundleController,
+                decoration: const InputDecoration(
+                  labelText: 'Local .mapperpack.tar',
+                  prefixIcon: Icon(Icons.inventory_2_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (_) => _loading ? null : _installBundle(),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.icon(
+                onPressed: _loading ? null : _installBundle,
+                icon: const Icon(Icons.archive_outlined),
+                label: const Text('Install bundle'),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                _SheetMessage(
+                  icon: Icons.error_outline,
+                  title: 'Map install failed',
+                  body: _error.toString(),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RegistryPackList extends StatelessWidget {
+  const _RegistryPackList({
+    required this.status,
+    required this.loading,
+    required this.onInstall,
+  });
+
+  final RegistryStatus status;
+  final bool loading;
+  final ValueChanged<RegistryPackStatus> onInstall;
+
+  @override
+  Widget build(BuildContext context) {
+    if (status.packs.isEmpty) {
+      return const _SheetMessage(
+        icon: Icons.map_outlined,
+        title: 'No packs in registry',
+        body: 'The loaded registry did not return any map packs.',
+      );
+    }
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 320),
+      child: ListView.separated(
+        shrinkWrap: true,
+        itemCount: status.packs.length,
+        separatorBuilder: (_, _) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final pack = status.packs[index];
+          final action = pack.installed
+              ? pack.updateAvailable
+                    ? 'Update'
+                    : 'Open'
+              : 'Install';
+          return ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(pack.active ? Icons.check_circle : Icons.map),
+            title: Text(pack.name, overflow: TextOverflow.ellipsis),
+            subtitle: Text(
+              '${pack.country}  ${_formatBytes(pack.bytes)}  ${pack.registryVersion}',
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: FilledButton(
+              onPressed: loading ? null : () => onInstall(pack),
+              child: Text(action),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+String _formatBytes(int bytes) {
+  const units = ['B', 'KB', 'MB', 'GB'];
+  var value = bytes.toDouble();
+  var unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value = value / 1024;
+    unit++;
+  }
+  return '${value.toStringAsFixed(unit == 0 ? 0 : 1)} ${units[unit]}';
 }
 
 class _ActivePlaceSummary extends StatelessWidget {
