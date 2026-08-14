@@ -150,7 +150,8 @@ class ProcessMapperPackClient implements MapperPackClient {
       final body = await response.transform(utf8.decoder).join();
       final json = jsonDecode(body) as Map<String, Object?>;
       final features = json['features'] as List<Object?>? ?? const [];
-      final regions = <GeofabrikRegion>[];
+      final centerRegions = <GeofabrikRegion>[];
+      final otherRegions = <GeofabrikRegion>[];
       for (final feature in features.whereType<Map<String, Object?>>()) {
         final properties = feature['properties'] as Map<String, Object?>?;
         final geometry = feature['geometry'] as Map<String, Object?>?;
@@ -169,14 +170,31 @@ class ProcessMapperPackClient implements MapperPackClient {
         if (bbox == null) {
           continue;
         }
-        if (_bboxContainsViewport(bbox, viewport)) {
-          regions.add(
-            GeofabrikRegion(id: id, name: name, pbfUrl: pbfUrl, bbox: bbox),
-          );
+        final region = GeofabrikRegion(
+          id: id,
+          name: name,
+          pbfUrl: pbfUrl,
+          bbox: bbox,
+        );
+        if (_geometryContainsPoint(
+          geometry['type'],
+          geometry['coordinates'],
+          viewport.centerLon,
+          viewport.centerLat,
+        )) {
+          centerRegions.add(region);
+          continue;
+        }
+        if (_bboxMatchesViewport(bbox, viewport)) {
+          otherRegions.add(region);
         }
       }
+      final regions = centerRegions.isNotEmpty ? centerRegions : otherRegions;
       regions.sort((left, right) {
-        return _bboxArea(left.bbox).compareTo(_bboxArea(right.bbox));
+        return _regionRank(
+          left.bbox,
+          viewport,
+        ).compareTo(_regionRank(right.bbox, viewport));
       });
       return regions;
     } finally {
@@ -378,6 +396,85 @@ List<double>? _geometryBbox(Object? value) {
   return [minLon, minLat, maxLon, maxLat];
 }
 
+bool _geometryContainsPoint(
+  Object? type,
+  Object? coordinates,
+  double lon,
+  double lat,
+) {
+  if (type == 'Polygon') {
+    return _polygonContainsPoint(coordinates, lon, lat);
+  }
+  if (type == 'MultiPolygon' && coordinates is List<Object?>) {
+    return coordinates.any(
+      (polygon) => _polygonContainsPoint(polygon, lon, lat),
+    );
+  }
+  return false;
+}
+
+bool _polygonContainsPoint(Object? polygon, double lon, double lat) {
+  if (polygon is! List<Object?> || polygon.isEmpty) {
+    return false;
+  }
+  if (!_ringContainsPoint(polygon.first, lon, lat)) {
+    return false;
+  }
+  for (final hole in polygon.skip(1)) {
+    if (_ringContainsPoint(hole, lon, lat)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _ringContainsPoint(Object? ring, double lon, double lat) {
+  if (ring is! List<Object?> || ring.length < 3) {
+    return false;
+  }
+
+  var inside = false;
+  final lastCoordinate = _coordinate(ring.last);
+  if (lastCoordinate == null) {
+    return false;
+  }
+  var previous = lastCoordinate;
+  for (final item in ring) {
+    final current = _coordinate(item);
+    if (current == null) {
+      return false;
+    }
+    final xi = current[0];
+    final yi = current[1];
+    final xj = previous[0];
+    final yj = previous[1];
+    final intersects =
+        ((yi > lat) != (yj > lat)) &&
+        (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+    if (intersects) {
+      inside = !inside;
+    }
+    previous = current;
+  }
+  return inside;
+}
+
+List<double>? _coordinate(Object? value) {
+  if (value is List<Object?> &&
+      value.length >= 2 &&
+      value[0] is num &&
+      value[1] is num) {
+    return [(value[0] as num).toDouble(), (value[1] as num).toDouble()];
+  }
+  return null;
+}
+
+bool _bboxMatchesViewport(List<double> bbox, MapViewport viewport) {
+  return _bboxContainsViewport(bbox, viewport) ||
+      _bboxContainsPoint(bbox, viewport.centerLon, viewport.centerLat) ||
+      _bboxIntersectsViewport(bbox, viewport);
+}
+
 bool _bboxContainsViewport(List<double> bbox, MapViewport viewport) {
   return bbox[0] <= viewport.minLon &&
       bbox[1] <= viewport.minLat &&
@@ -385,8 +482,29 @@ bool _bboxContainsViewport(List<double> bbox, MapViewport viewport) {
       bbox[3] >= viewport.maxLat;
 }
 
+bool _bboxContainsPoint(List<double> bbox, double lon, double lat) {
+  return bbox[0] <= lon && bbox[1] <= lat && bbox[2] >= lon && bbox[3] >= lat;
+}
+
+bool _bboxIntersectsViewport(List<double> bbox, MapViewport viewport) {
+  return bbox[0] <= viewport.maxLon &&
+      bbox[2] >= viewport.minLon &&
+      bbox[1] <= viewport.maxLat &&
+      bbox[3] >= viewport.minLat;
+}
+
 double _bboxArea(List<double> bbox) {
   return (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]);
+}
+
+double _regionRank(List<double> bbox, MapViewport viewport) {
+  final coverage =
+      _bboxContainsPoint(bbox, viewport.centerLon, viewport.centerLat)
+      ? 0
+      : _bboxContainsViewport(bbox, viewport)
+      ? 1
+      : 2;
+  return coverage * 1000000000 + _bboxArea(bbox);
 }
 
 String _safeId(String id) {

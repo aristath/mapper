@@ -14,6 +14,10 @@ class MapViewport {
   final double maxLat;
 
   String get bboxArgument => '$minLon,$minLat,$maxLon,$maxLat';
+
+  double get centerLon => (minLon + maxLon) / 2;
+
+  double get centerLat => (minLat + maxLat) / 2;
 }
 
 class Features {

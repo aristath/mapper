@@ -86,6 +86,15 @@ The e2e downloads the Monaco OpenStreetMap extract from Geofabrik, builds
 PMTiles through the local tile builder path, assembles a Mapper pack, installs
 it, selects it, and verifies the active runtime points at local PMTiles.
 
+Run the live visible-area catalog e2e:
+
+```bash
+scripts/e2e-geofabrik-visible-area.sh
+```
+
+The visible-area e2e queries Geofabrik through the app's Dart catalog client
+and verifies a broad Greece viewport returns `greece` as the first download.
+
 Download an OpenStreetMap extract:
 
 ```bash

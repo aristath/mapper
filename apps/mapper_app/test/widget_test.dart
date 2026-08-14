@@ -81,6 +81,41 @@ void main() {
 
     expect(client.installedRegionIds, ['monaco']);
   });
+
+  testWidgets('offline maps offers regions for broad visible areas', (
+    tester,
+  ) async {
+    final client = _BroadViewportMapperPackClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MapsManagerSheet(
+            client: client,
+            storePath: 'target/test-store',
+            catalogPath: 'target/missing-catalog/registry.json',
+            cachePath: 'target/test-cache',
+            viewport: const MapViewport(
+              minLon: 18.0,
+              minLat: 36.0,
+              maxLon: 26.5,
+              maxLat: 42.0,
+            ),
+            installedPackIds: const {},
+            onStoreChanged: () async {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pump();
+
+    expect(find.text('Greece'), findsOneWidget);
+    expect(find.text('No downloadable map found'), findsNothing);
+    expect(find.text('No downloadable map for this view'), findsNothing);
+  });
 }
 
 class _FakeMapperPackClient implements MapperPackClient {
@@ -205,5 +240,22 @@ class _FallbackMapperPackClient extends _FakeMapperPackClient {
     required String cachePath,
   }) async {
     installedRegionIds.add(region.id);
+  }
+}
+
+class _BroadViewportMapperPackClient extends _FallbackMapperPackClient {
+  @override
+  Future<List<GeofabrikRegion>> downloadableRegionsCoveringViewport({
+    required MapViewport viewport,
+  }) async {
+    downloadableRegionCalls++;
+    return const [
+      GeofabrikRegion(
+        id: 'greece',
+        name: 'Greece',
+        pbfUrl: 'https://download.geofabrik.de/europe/greece-latest.osm.pbf',
+        bbox: [19.2477876, 34.7006096, 29.7296986, 41.7488862],
+      ),
+    ];
   }
 }
