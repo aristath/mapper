@@ -22,12 +22,12 @@ class MapperApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Mapper',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xff2f6f73),
           brightness: Brightness.light,
         ),
-        scaffoldBackgroundColor: const Color(0xffeee9df),
         useMaterial3: true,
       ),
       home: MapperHome(client: client, storePath: storePath),
@@ -107,40 +107,101 @@ class _MapperHomeState extends State<MapperHome> {
   @override
   Widget build(BuildContext context) {
     final snapshot = _snapshot;
+    final activeRuntime = snapshot?.activeRuntime;
     return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            _TopBar(
-              loading: _loading,
-              storePath: widget.storePath,
-              onRefresh: _refresh,
+      body: Stack(
+        children: [
+          Positioned.fill(child: MapSurface(runtime: activeRuntime)),
+          SafeArea(
+            child: Stack(
+              children: [
+                Positioned(
+                  top: 12,
+                  left: 16,
+                  right: 16,
+                  child: _SearchBar(
+                    loading: _loading,
+                    activeRuntime: activeRuntime,
+                    onRefresh: _refresh,
+                  ),
+                ),
+                Positioned(
+                  top: 92,
+                  right: 16,
+                  child: _MapControls(onRefresh: _refresh),
+                ),
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 16,
+                  child: _NavigationSheet(
+                    snapshot: snapshot,
+                    error: _error,
+                    storePath: widget.storePath,
+                    onSelectPack: _setActive,
+                  ),
+                ),
+              ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchBar extends StatelessWidget {
+  const _SearchBar({
+    required this.loading,
+    required this.activeRuntime,
+    required this.onRefresh,
+  });
+
+  final bool loading;
+  final RuntimeConfig? activeRuntime;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: _surfaceDecoration(shadow: true),
+      child: SizedBox(
+        height: 64,
+        child: Row(
+          children: [
+            const SizedBox(width: 6),
+            IconButton(
+              tooltip: 'Menu',
+              onPressed: () {},
+              icon: const Icon(Icons.menu),
+            ),
+            const SizedBox(width: 2),
             Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    width: 340,
-                    child: _PackPanel(
-                      snapshot: snapshot,
-                      error: _error,
-                      onSelect: _setActive,
-                    ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(0, 12, 12, 12),
-                      child: MapSurface(runtime: snapshot?.activeRuntime),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 330,
-                    child: _RuntimePanel(runtime: snapshot?.activeRuntime),
-                  ),
-                ],
+              child: Text(
+                activeRuntime == null
+                    ? 'Search offline maps'
+                    : 'Search ${activeRuntime!.name}',
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium
+                    ?.copyWith(color: const Color(0xff30343a)),
               ),
             ),
+            if (loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else
+              IconButton(
+                tooltip: 'Refresh offline state',
+                onPressed: onRefresh,
+                icon: const Icon(Icons.refresh),
+              ),
+            const SizedBox(width: 6),
           ],
         ),
       ),
@@ -148,218 +209,270 @@ class _MapperHomeState extends State<MapperHome> {
   }
 }
 
-class _TopBar extends StatelessWidget {
-  const _TopBar({
-    required this.loading,
-    required this.storePath,
-    required this.onRefresh,
-  });
+class _MapControls extends StatelessWidget {
+  const _MapControls({required this.onRefresh});
 
-  final bool loading;
-  final String storePath;
   final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: const BoxDecoration(
-        color: Color(0xfff8f5eb),
-        border: Border(bottom: BorderSide(color: Color(0xff2b2f33))),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.map_outlined, size: 28),
-          const SizedBox(width: 10),
-          Text('Mapper', style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(width: 20),
-          Expanded(
-            child: Text(
-              storePath,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ),
-          if (loading)
-            const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else
-            IconButton(
-              tooltip: 'Refresh',
-              onPressed: onRefresh,
-              icon: const Icon(Icons.refresh),
-            ),
-        ],
+    return Column(
+      children: [
+        _RoundMapButton(
+          icon: Icons.my_location,
+          tooltip: 'Current location',
+          onPressed: () {},
+        ),
+        const SizedBox(height: 10),
+        _RoundMapButton(
+          icon: Icons.layers_outlined,
+          tooltip: 'Map layers',
+          onPressed: () {},
+        ),
+        const SizedBox(height: 10),
+        _RoundMapButton(
+          icon: Icons.refresh,
+          tooltip: 'Refresh',
+          onPressed: onRefresh,
+        ),
+      ],
+    );
+  }
+}
+
+class _RoundMapButton extends StatelessWidget {
+  const _RoundMapButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: _surfaceDecoration(shadow: true, radius: 28),
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(icon),
       ),
     );
   }
 }
 
-class _PackPanel extends StatelessWidget {
-  const _PackPanel({
+class _NavigationSheet extends StatelessWidget {
+  const _NavigationSheet({
     required this.snapshot,
     required this.error,
-    required this.onSelect,
+    required this.storePath,
+    required this.onSelectPack,
   });
 
   final StoreSnapshot? snapshot;
   final Object? error;
-  final ValueChanged<InstalledPack> onSelect;
+  final String storePath;
+  final ValueChanged<InstalledPack> onSelectPack;
 
   @override
   Widget build(BuildContext context) {
     final packs = snapshot?.installed ?? const <InstalledPack>[];
-    final activeId = snapshot?.active?.id;
-    return Container(
-      margin: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xfff8f5eb),
-        border: Border.all(color: const Color(0xff2b2f33)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const _PanelHeader(icon: Icons.inventory_2_outlined, label: 'Packs'),
-          if (error != null)
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(
-                error.toString(),
-                style: const TextStyle(color: Color(0xff9d3131)),
-              ),
-            ),
-          if (packs.isEmpty && error == null)
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: Text('No installed packs'),
-            ),
-          Expanded(
-            child: ListView.separated(
-              itemCount: packs.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final pack = packs[index];
-                final active = pack.id == activeId;
-                return ListTile(
-                  selected: active,
-                  leading: Icon(
-                    active ? Icons.radio_button_checked : Icons.map_outlined,
+    final active = snapshot?.active;
+    final runtime = snapshot?.activeRuntime;
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: DecoratedBox(
+          decoration: _surfaceDecoration(shadow: true, radius: 18),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xffb8b3aa),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
-                  title: Text(pack.name),
-                  subtitle: Text('${pack.id}  ${pack.version}'),
-                  trailing: active
-                      ? const Icon(Icons.check)
-                      : IconButton(
-                          tooltip: 'Set active',
-                          onPressed: () => onSelect(pack),
-                          icon: const Icon(Icons.play_arrow),
-                        ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RuntimePanel extends StatelessWidget {
-  const _RuntimePanel({required this.runtime});
-
-  final RuntimeConfig? runtime;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(0, 12, 12, 12),
-      decoration: BoxDecoration(
-        color: const Color(0xfff8f5eb),
-        border: Border.all(color: const Color(0xff2b2f33)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const _PanelHeader(icon: Icons.tune, label: 'Runtime'),
-          if (runtime == null)
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: Text('No active runtime'),
-            )
-          else
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.all(12),
-                children: [
-                  _Fact(label: 'Pack', value: runtime!.id),
-                  _Fact(label: 'Version', value: runtime!.version),
-                  _Fact(label: 'BBox', value: runtime!.bbox.join(', ')),
-                  _Fact(
-                    label: 'Routing',
-                    value: runtime!.features.routing.join(', '),
+                ),
+                const SizedBox(height: 12),
+                if (error != null)
+                  _SheetMessage(
+                    icon: Icons.error_outline,
+                    title: 'Offline map state failed',
+                    body: error.toString(),
+                  )
+                else if (runtime != null)
+                  _ActivePlaceSummary(runtime: runtime)
+                else
+                  _SheetMessage(
+                    icon: Icons.download_for_offline_outlined,
+                    title: 'No offline map opened',
+                    body: packs.isEmpty
+                        ? 'Download or install a city pack to start exploring offline.'
+                        : 'Choose one of your installed packs to open the map.',
                   ),
-                  _Fact(label: 'Tiles', value: runtime!.assets.vectorTiles),
-                  _Fact(label: 'Style', value: runtime!.assets.styleJson),
-                  _Fact(
-                    label: 'Valhalla',
-                    value: runtime!.assets.valhallaTiles,
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: runtime == null ? null : () {},
+                        icon: const Icon(Icons.directions),
+                        label: const Text('Directions'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: runtime == null ? null : () {},
+                        icon: const Icon(Icons.bookmark_border),
+                        label: const Text('Save'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () {},
+                        icon: const Icon(Icons.download_outlined),
+                        label: const Text('Maps'),
+                      ),
+                    ),
+                  ],
+                ),
+                if (packs.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 44,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: packs.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 8),
+                      itemBuilder: (context, index) {
+                        final pack = packs[index];
+                        final selected = pack.id == active?.id;
+                        return ChoiceChip(
+                          selected: selected,
+                          label: Text(pack.name),
+                          avatar: Icon(
+                            selected ? Icons.check : Icons.map_outlined,
+                            size: 18,
+                          ),
+                          onSelected: selected
+                              ? null
+                              : (_) => onSelectPack(pack),
+                        );
+                      },
+                    ),
                   ),
                 ],
-              ),
+                const SizedBox(height: 6),
+                Text(
+                  storePath,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: const Color(0xff67625b)),
+                ),
+              ],
             ),
-        ],
+          ),
+        ),
       ),
     );
   }
 }
 
-class _PanelHeader extends StatelessWidget {
-  const _PanelHeader({required this.icon, required this.label});
+class _ActivePlaceSummary extends StatelessWidget {
+  const _ActivePlaceSummary({required this.runtime});
+
+  final RuntimeConfig runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    final routing = runtime.features.routing.isEmpty
+        ? 'routing unavailable'
+        : runtime.features.routing.join(', ');
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const CircleAvatar(
+          backgroundColor: Color(0xff2f6f73),
+          foregroundColor: Colors.white,
+          child: Icon(Icons.map_outlined),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(runtime.name, style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 3),
+              Text('${runtime.id}  ${runtime.version}'),
+              const SizedBox(height: 3),
+              Text('Offline. ${runtime.bbox.join(', ')}. $routing.'),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SheetMessage extends StatelessWidget {
+  const _SheetMessage({
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
 
   final IconData icon;
-  final String label;
+  final String title;
+  final String body;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xff2b2f33))),
-      ),
-      child: Row(
-        children: [
-          Icon(icon),
-          const SizedBox(width: 8),
-          Text(label, style: Theme.of(context).textTheme.titleMedium),
-        ],
-      ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 32),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 4),
+              Text(body),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _Fact extends StatelessWidget {
-  const _Fact({required this.label, required this.value});
-
-  final String label;
-  final String? value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.labelMedium),
-          const SizedBox(height: 3),
-          SelectableText(value?.isNotEmpty == true ? value! : '-'),
-        ],
-      ),
-    );
-  }
+BoxDecoration _surfaceDecoration({bool shadow = false, double radius = 16}) {
+  return BoxDecoration(
+    color: const Color(0xfffbf8ef),
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: const Color(0x332b2f33)),
+    boxShadow: shadow
+        ? const [
+            BoxShadow(
+              color: Color(0x33000000),
+              blurRadius: 18,
+              offset: Offset(0, 8),
+            ),
+          ]
+        : null,
+  );
 }
