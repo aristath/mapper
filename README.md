@@ -86,6 +86,15 @@ The e2e downloads the Monaco OpenStreetMap extract from Geofabrik, builds
 PMTiles through the local tile builder path, assembles a Mapper pack, installs
 it, selects it, and verifies the active runtime points at local PMTiles.
 
+Run the app-client map-install e2e:
+
+```bash
+scripts/e2e-app-client-map-install.sh
+```
+
+This runs the same Dart `ProcessMapperPackClient.installGeofabrikRegion` path
+that the app's download button uses.
+
 Run the live visible-area catalog e2e:
 
 ```bash

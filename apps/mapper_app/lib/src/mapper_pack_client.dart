@@ -216,15 +216,13 @@ class ProcessMapperPackClient implements MapperPackClient {
 
     await _runShell('mkdir -p ${_q(workDir)}');
     await _runShell(
-      '${_q(repoRoot)}/scripts/download-osm-extract.sh ${_q(region.pbfUrl)} ${_q(pbf)}',
+      'scripts/download-osm-extract.sh ${_q(region.pbfUrl)} ${_q(pbf)}',
     );
-    await _runShell(
-      '${_q(repoRoot)}/scripts/build-vector-tiles.sh ${_q(pbf)} ${_q(pmtiles)}',
-    );
+    await _runShell('scripts/build-vector-tiles.sh ${_q(pbf)} ${_q(pmtiles)}');
     await _runShell('rm -rf ${_q(pack)}');
     await _runShell(
       [
-        '${_q(repoRoot)}/scripts/assemble-pack.sh',
+        'scripts/assemble-pack.sh',
         '--out',
         _q(pack),
         '--id',
@@ -245,6 +243,18 @@ class ProcessMapperPackClient implements MapperPackClient {
         _q(pmtiles),
       ].join(' '),
     );
+    await _runAllowFailure([
+      'run',
+      '-q',
+      '-p',
+      'mapper-pack',
+      '--',
+      'uninstall',
+      '--store',
+      storePath,
+      '--id',
+      safeId,
+    ]);
     await _run([
       'run',
       '-q',
@@ -341,6 +351,10 @@ class ProcessMapperPackClient implements MapperPackClient {
       throw MapperPackException(stderr.isNotEmpty ? stderr : stdout);
     }
     return (result.stdout as Object).toString();
+  }
+
+  Future<void> _runAllowFailure(List<String> arguments) async {
+    await Process.run(executable, arguments, workingDirectory: repoRoot);
   }
 
   Future<void> _runShell(String command) async {
